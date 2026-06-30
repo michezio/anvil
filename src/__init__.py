@@ -5,6 +5,6 @@ __author__ = "Michele Abruzzese"
 __email__ = "oniricha04@gmail.com"
 __license__ = "MIT"
 
-from .cli import main
+from .anvil import main
 
 __all__ = ["main"]

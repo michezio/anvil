@@ -33,7 +33,7 @@ Repository = "https://github.com/michezio/anvil.git"
 Issues = "https://github.com/michezio/anvil/issues"
 
 [project.scripts]
-anvil = "anvil.cli:main"
+anvil = "src.anvil:main"
 
 [tool.setuptools]
-packages = ["anvil"]
+packages = ["src"]
