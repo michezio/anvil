@@ -1,0 +1,44 @@
+[
+  {
+    "name": "o2_gcc",
+    "compiler": "g++",
+    "standard": "c++23",
+    "cxx_flags": "-O2",
+    "defines": []
+  },
+  {
+    "name": "o3_gcc",
+    "compiler": "g++",
+    "standard": "c++23",
+    "cxx_flags": "-O3",
+    "defines": []
+  },
+  {
+    "name": "ofast_gcc",
+    "compiler": "g++",
+    "standard": "c++23",
+    "cxx_flags": "-Ofast -ffast-math -fno-math-errno -fno-trapping-math",
+    "defines": []
+  },
+  {
+    "name": "o3_no_vectorize_gcc",
+    "compiler": "g++",
+    "standard": "c++23",
+    "cxx_flags": "-O3 -fno-tree-vectorize",
+    "defines": []
+  },
+  {
+    "name": "o2_zig",
+    "compiler": "zig c++",
+    "standard": "c++23",
+    "cxx_flags": "-O2",
+    "defines": []
+  },
+  {
+    "name": "o3_zig",
+    "compiler": "zig c++",
+    "standard": "c++23",
+    "cxx_flags": "-O3",
+    "defines": []
+  }
+]
