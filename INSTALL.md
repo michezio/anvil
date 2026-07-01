@@ -52,7 +52,7 @@ anvil --target /path/to/myapp.cpp
 ### Option 3: Install from PyPI (future)
 
 ```bash
-pip install anvil-build
+pip install anvil-matrix
 anvil --target myapp.cpp
 ```
 
@@ -60,11 +60,11 @@ anvil --target myapp.cpp
 
 ```
 anvil/
-├── anvil/                      # Python package
+├── src/                       # Python package
 │   ├── __init__.py            # Package init, exports main()
 │   ├── __main__.py            # Entry point for python -m anvil
-│   └── cli.py                 # Main CLI logic
-├── examples/                   # Example configurations
+│   └── anvil.py               # Main logic
+├── examples/                  # Example configurations
 │   ├── anvil.project.json
 │   ├── anvil.variants.quick.json
 │   └── anvil.variants.full.json

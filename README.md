@@ -22,7 +22,7 @@ Perfect for:
 ### From source (editable)
 
 ```bash
-git clone https://github.com/your-repo/anvil.git
+git clone https://github.com/michezio/anvil.git
 cd anvil
 pip install -e .
 ```
@@ -37,7 +37,7 @@ anvil --target myfile.cpp
 ### From PyPI (future)
 
 ```bash
-pip install anvil-build
+pip install anvil-matrix
 anvil --target myfile.cpp
 ```
 

@@ -3,8 +3,8 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "anvil-build"
-version = "0.1.0"
+name = "anvil-matrix"
+version = "0.1.1"
 description = "Build-matrix tool for C/C++ projects — compile with multiple compiler/flag variants."
 readme = "README.md"
 license = {text = "MIT"}
