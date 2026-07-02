@@ -135,10 +135,6 @@ DEFAULT_PROJECT_CONFIG = ProjectConfig(
 # Utilities
 # =============================================================================
 
-def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
 def effective_jobs(jobs: int) -> int:
     if jobs <= 0:
         return multiprocessing.cpu_count() or 1
@@ -627,7 +623,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    root = repo_root()
+    root = Path(os.getcwd())
 
     # --- Resolve target ---
     if args.target is None and args.project_config is None:
@@ -700,7 +696,7 @@ def main() -> int:
         if not config.cmake_target:
             print("CMake mode requires 'cmake_target' in project config.", file=sys.stderr)
             return 2
-        return _run_cmake_matrix(root, config, out_dir, variants, args.build_type)
+        return _run_cmake_matrix(target, config, out_dir, variants, args.build_type)
 
     # --- Direct compilation mode (file or folder) ---
     if mode == "file":
