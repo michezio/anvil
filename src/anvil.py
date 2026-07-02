@@ -10,26 +10,29 @@ and defines. Supports three modes:
   3. CMake project      — uses CMakeLists.txt if present in target directory.
 
 Config discovery:
-  - If anvil.project.json and anvil.variants.<preset>.json exist next to the
-    target, they are used automatically.
+  - If anvil_project.json and anvil_variants.json exist next to the project
+    definition path, they are used. The default project path is the target,
+    and the default variants path is the project directory.
   - Otherwise built-in defaults are applied.
 
-anvil.project.json format:
+anvil_project.json format:
   {
-    "name": "my_project",         // project name (used in output paths)
-    "build_dir": "/build/myproj", // cmake build directory (cmake mode only)
-    "out_dir": ".out/anvil_build/myproj", // where to collect artifacts
-    "cmake_target": "my_target",  // cmake --build --target (cmake mode only)
-    "cmake_args": [],             // extra cmake configure args
-    "env_setup": "",              // script to source before building (optional)
-    "include_dirs": [],           // extra -I paths (direct mode)
-    "link_flags": "",             // extra linker flags
-
-    "jobs": 0,                    // compile jobs per variant (0 = nproc)
-    "parallel_variants": 1,       // how many variants to build simultaneously
-    "stop_on_error": false,       // abort on first variant failure
-    "clean": false,               // default clean behavior
-    "verbose": false              // print full commands
+    "name": "my_project",
+    "build_dir": "/build/myproj",
+    "out_dir": ".out/anvil_build/myproj",
+    "cmake": {
+      "target": "my_target",
+      "build_type": "Release",
+      "args": []
+    },
+    "env_setup": "",
+    "include_dirs": [],
+    "link_flags": "",
+    "jobs": 0,
+    "parallel_variants": 1,
+    "stop_on_error": false,
+    "clean": false,
+    "verbose": false
   }
 
 Variant format (with optional compiler/standard):
@@ -48,14 +51,8 @@ Usage examples:
   # Folder (all .cpp files recursively)
   python -m anvil --target sandbox/Filters/
 
-  # Explicit configs (CMake mode)
-  python -m anvil \
-    --project-config myproject/anvil.project.json \
-    --variants myproject/anvil.variants.quick.json \
-    --build-type Release --clean
-
-  # Use a preset name to pick anvil.variants.<preset>.json
-  python -m anvil --target src/ --preset full
+  # Use a project definition from another location while building the cwd project
+  python -m anvil --project extras/Eigen_benchmark
 """
 
 import argparse
@@ -89,6 +86,7 @@ class ProjectConfig:
     build_dir: str
     out_dir: str
     cmake_target: str
+    cmake_build_type: str
     cmake_args: tuple[str, ...]
     env_setup: str
     include_dirs: tuple[str, ...]
@@ -119,6 +117,7 @@ DEFAULT_PROJECT_CONFIG = ProjectConfig(
     build_dir="/build/anvil",
     out_dir="",
     cmake_target="",
+    cmake_build_type="",
     cmake_args=(),
     env_setup="",
     include_dirs=(),
@@ -134,6 +133,67 @@ DEFAULT_PROJECT_CONFIG = ProjectConfig(
 # =============================================================================
 # Utilities
 # =============================================================================
+
+def repo_root() -> Path:
+    return Path.cwd().resolve()
+
+
+def resolve_path(path_like: str | Path | None, *, base_dir: Path | None = None) -> Path | None:
+    if path_like is None:
+        return None
+    path = Path(path_like).expanduser()
+    if path.is_absolute():
+        return path.resolve(strict=False)
+    base = base_dir if base_dir is not None else Path.cwd()
+    return (base / path).resolve(strict=False)
+
+
+def resolve_existing_path(
+    path_like: str | Path | None,
+    *,
+    base_dir: Path | None = None,
+    fallback_dirs: tuple[Path, ...] = (),
+) -> Path | None:
+    if path_like is None:
+        return None
+
+    path = Path(path_like).expanduser()
+    if path.is_absolute():
+        candidate = path.resolve(strict=False)
+        return candidate if candidate.exists() else None
+
+    search_dirs = [base_dir if base_dir is not None else Path.cwd(), *fallback_dirs]
+    for search_dir in search_dirs:
+        candidate = (search_dir / path).resolve(strict=False)
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+def resolve_config_path(
+    path_like: str | Path | None,
+    *,
+    base_dir: Path | None = None,
+    fallback_dirs: tuple[Path, ...] = (),
+    names: tuple[str, ...] = (),
+) -> Path | None:
+    if path_like is None:
+        return None
+
+    explicit_path = resolve_existing_path(path_like, base_dir=base_dir, fallback_dirs=fallback_dirs)
+    if explicit_path is not None:
+        if explicit_path.is_file():
+            return explicit_path
+        if explicit_path.is_dir():
+            for name in names:
+                candidate = explicit_path / name
+                if candidate.exists():
+                    return candidate
+        return None
+
+    return None
+
 
 def effective_jobs(jobs: int) -> int:
     if jobs <= 0:
@@ -180,16 +240,52 @@ def resolve_compiler_command(compiler: str) -> list[str]:
 # Config discovery & parsing
 # =============================================================================
 
-def discover_configs(target_path: Path, preset: str) -> tuple[Path | None, Path | None]:
-    """Look for anvil.project.json and anvil.variants.<preset>.json near the target."""
-    search_dir = target_path.parent if target_path.is_file() else target_path
+def discover_configs(
+    target_path: Path,
+    *,
+    base_dir: Path | None = None,
+    project_config_path: Path | None = None,
+    variants_config_path: Path | None = None,
+) -> tuple[Path | None, Path | None]:
+    """Look for project/variant config files near the target, the project config, and the working directory."""
+    search_dirs: list[Path] = []
+    if target_path.is_file():
+        search_dirs.append(target_path.parent)
+    elif target_path.exists():
+        search_dirs.append(target_path)
 
-    project_json = search_dir / "anvil.project.json"
-    variants_json = search_dir / f"anvil.variants.{preset}.json"
+    if project_config_path is not None:
+        resolved_project_config = project_config_path.resolve(strict=False)
+        if resolved_project_config.parent.exists():
+            search_dirs.append(resolved_project_config.parent)
 
-    proj = project_json if project_json.exists() else None
-    var = variants_json if variants_json.exists() else None
-    return proj, var
+    if variants_config_path is not None:
+        resolved_variants_config = variants_config_path.resolve(strict=False)
+        if resolved_variants_config.parent.exists():
+            search_dirs.append(resolved_variants_config.parent)
+
+    if base_dir is not None:
+        search_dirs.append(base_dir)
+
+    seen: set[Path] = set()
+    for search_dir in search_dirs:
+        resolved_dir = search_dir.resolve(strict=False)
+        if resolved_dir in seen:
+            continue
+        seen.add(resolved_dir)
+
+        project_json = next(
+            (resolved_dir / name for name in ("anvil_project.json", "anvil.project.json") if (resolved_dir / name).exists()),
+            None,
+        )
+        variants_json = next(
+            (resolved_dir / name for name in ("anvil_variants.json", "anvil.variants.json") if (resolved_dir / name).exists()),
+            None,
+        )
+        if project_json is not None or variants_json is not None:
+            return project_json, variants_json
+
+    return None, None
 
 
 def parse_project_config(path: Path) -> ProjectConfig:
@@ -199,10 +295,18 @@ def parse_project_config(path: Path) -> ProjectConfig:
     build_dir = str(data.get("build_dir", f"/build/anvil/{name}")).strip()
     out_dir = str(data.get("out_dir", f".out/anvil_build/{name}")).strip()
 
-    cmake_target = str(data.get("cmake_target", "")).strip()
-    cmake_args_raw = data.get("cmake_args", [])
+    cmake_section = data.get("cmake")
+    if isinstance(cmake_section, dict):
+        cmake_target = str(cmake_section.get("target", data.get("cmake_target", ""))).strip()
+        cmake_build_type = str(cmake_section.get("build_type", data.get("build_type", ""))).strip()
+        cmake_args_raw = cmake_section.get("args", data.get("cmake_args", []))
+    else:
+        cmake_target = str(data.get("cmake_target", "")).strip()
+        cmake_build_type = str(data.get("build_type", "")).strip()
+        cmake_args_raw = data.get("cmake_args", [])
+
     if not isinstance(cmake_args_raw, list):
-        raise ValueError("'cmake_args' must be a list")
+        raise ValueError("'cmake.args' must be a list")
     cmake_args = tuple(str(v) for v in cmake_args_raw)
 
     env_setup = str(data.get("env_setup", "")).strip()
@@ -224,6 +328,7 @@ def parse_project_config(path: Path) -> ProjectConfig:
         build_dir=build_dir,
         out_dir=out_dir,
         cmake_target=cmake_target,
+        cmake_build_type=cmake_build_type,
         cmake_args=cmake_args,
         env_setup=env_setup,
         include_dirs=include_dirs,
@@ -375,9 +480,10 @@ def build_cmake(
     cmake_cmd = (
         f"cmake -S {sh_quote(str(root))} -B {sh_quote(str(build_dir))} "
         f"{compiler_override}"
-        f"{cmake_args_joined} "
-        f"-DCMAKE_BUILD_TYPE={sh_quote(build_type)}"
+        f"{cmake_args_joined}"
     )
+    if config.cmake_build_type:
+        cmake_cmd = f"{cmake_cmd} -DCMAKE_BUILD_TYPE={sh_quote(config.cmake_build_type)}"
 
     # Inject flags via CXXFLAGS env var
     if config.env_setup:
@@ -574,28 +680,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Anvil, C/C++ build-matrix tool: compiles C/C++ targets with multiple variant configurations.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        epilog=__doc__ + "\nPath resolution notes:\n- Relative paths are resolved from the current working directory.\n- --project defaults to the target path and resolves to <target>/anvil_project.json.\n- --variants defaults to the project directory and resolves to <project_dir>/anvil_variants.json.",
     )
     parser.add_argument(
-        "--target", type=Path,
-        help="Path to a .cpp file or folder. Auto-detects build mode (file/folder/cmake).",
+        "--target", type=Path, default=".",
+        help="Path to a .cpp file, folder, or CMake project root. Relative paths are resolved from the current working directory (default: .).",
     )
     parser.add_argument(
-        "--project-config", type=Path,
-        help="Explicit project JSON config path. Overrides auto-detection.",
+        "--project", "--project-config", "--project-conf", type=Path,
+        dest="project",
+        help="Path to an anvil_project.json file or a folder that contains it. Relative paths are resolved from the current working directory.",
     )
     parser.add_argument(
         "--variants", type=Path,
-        help="Explicit variants JSON path. Overrides auto-detection.",
-    )
-    parser.add_argument(
-        "--preset", default="quick",
-        help="Variant preset name — looks for anvil.variants.<preset>.json (default: quick).",
-    )
-    parser.add_argument(
-        "--build-type", default="Release",
-        choices=["Release", "Debug", "MinSizeRel", "RelWithDebInfo"],
-        help="CMake build type (cmake mode only).",
+        help="Path to an anvil_variants.json file or a folder that contains it. Relative paths are resolved from the current working directory.",
     )
     parser.add_argument(
         "--clean", action="store_true", default=None,
@@ -623,26 +721,63 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    root = Path(os.getcwd())
+    cwd = Path.cwd().resolve()
+    root = repo_root()
 
-    # --- Resolve target ---
-    if args.target is None and args.project_config is None:
-        parser.error("Provide --target or --project-config")
+    target = resolve_path(args.target, base_dir=cwd)
+    if target is None or not target.exists():
+        print(f"Target not found: {target}", file=sys.stderr)
+        return 2
 
-    if args.target:
-        target = args.target.resolve()
-        if not target.exists():
-            print(f"Target not found: {target}", file=sys.stderr)
+    explicit_proj = None
+    if args.project is not None:
+        explicit_proj = resolve_config_path(
+            args.project,
+            base_dir=cwd,
+            fallback_dirs=(cwd, target.parent),
+            names=("anvil_project.json", "anvil.project.json"),
+        )
+        if explicit_proj is None:
+            print(f"Project config not found: {args.project}", file=sys.stderr)
             return 2
-    else:
-        target = args.project_config.parent.resolve()
 
-    # Discover config files near target
-    proj_json, var_json = discover_configs(target, args.preset)
-    if args.project_config and args.project_config.exists():
-        proj_json = args.project_config
-    if args.variants and args.variants.exists():
-        var_json = args.variants
+    project_base = target
+    if explicit_proj is not None:
+        project_base = explicit_proj.parent
+    elif args.project is not None:
+        project_base = resolve_path(args.project, base_dir=cwd) or target
+
+    explicit_vars = None
+    if args.variants is not None:
+        explicit_vars = resolve_config_path(
+            args.variants,
+            base_dir=cwd,
+            fallback_dirs=(cwd, project_base, target.parent),
+            names=("anvil_variants.json", "anvil.variants.json"),
+        )
+        if explicit_vars is None:
+            print(f"Variants config not found: {args.variants}", file=sys.stderr)
+            return 2
+
+    if explicit_proj is None:
+        proj_json = resolve_config_path(
+            project_base,
+            base_dir=cwd,
+            fallback_dirs=(cwd, target.parent),
+            names=("anvil_project.json", "anvil.project.json"),
+        )
+    else:
+        proj_json = explicit_proj
+
+    if explicit_vars is None:
+        var_json = resolve_config_path(
+            project_base,
+            base_dir=cwd,
+            fallback_dirs=(cwd, target.parent),
+            names=("anvil_variants.json", "anvil.variants.json"),
+        )
+    else:
+        var_json = explicit_vars
 
     # Parse project config (or use defaults)
     if proj_json:
@@ -685,18 +820,20 @@ def main() -> int:
 
     # Resolve output directory
     if config.out_dir:
-        out_path = Path(config.out_dir)
-        out_dir = out_path if out_path.is_absolute() else root / out_path
+        out_path = Path(config.out_dir).expanduser()
+        out_dir = out_path if out_path.is_absolute() else (root / out_path)
     else:
         out_dir = root / ".out" / "anvil_build" / config.name
+    out_dir = out_dir.resolve(strict=False)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # --- CMake mode ---
     if mode == "cmake":
         if not config.cmake_target:
-            print("CMake mode requires 'cmake_target' in project config.", file=sys.stderr)
+            print("CMake mode requires a cmake.target entry in the project config.", file=sys.stderr)
             return 2
-        return _run_cmake_matrix(target, config, out_dir, variants, args.build_type)
+        cmake_root = target.resolve(strict=False)
+        return _run_cmake_matrix(cmake_root, config, out_dir, variants, config.cmake_build_type or "Release")
 
     # --- Direct compilation mode (file or folder) ---
     if mode == "file":
@@ -712,6 +849,7 @@ def main() -> int:
         output_name = target.name
 
     print(f"Mode:    {mode}")
+    print(f"Target:  {target}")
     print(f"Sources: {len(sources)} file(s)")
     print(f"Output:  {out_dir}")
     if config.parallel_variants > 1:

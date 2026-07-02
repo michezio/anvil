@@ -24,9 +24,11 @@ anvil --target myfile.cpp
 # Verify it works
 python -m anvil --help
 
-# Try a quick build
-python -m anvil --target examples/sample.cpp
+# Try a quick build against one of your own C/C++ sources
+python -m anvil --target /path/to/your_file.cpp
 ```
+
+Anvil will look for project and variant config files named `anvil.project.json` / `anvil_project.json` and `anvil.variants.json` / `anvil_variants.json` near the target or project directory. You can also point to them explicitly with `--project` and `--variants`.
 
 ## Using from Another Project
 
@@ -65,9 +67,9 @@ anvil/
 │   ├── __main__.py            # Entry point for python -m anvil
 │   └── anvil.py               # Main logic
 ├── examples/                  # Example configurations
-│   ├── anvil.project.json
-│   ├── anvil.variants.quick.json
-│   └── anvil.variants.full.json
+│   ├── anvil_project.json
+│   ├── anvil_variants_quick.json
+│   └── anvil_variants_full.json
 ├── pyproject.toml             # Python package metadata
 ├── README.md                  # User documentation
 ├── LICENSE                    # MIT license

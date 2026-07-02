@@ -1,13 +1,15 @@
 {
   "name": "example_project",
   "build_dir": "/build/anvil/example",
-  "out_dir": ".out/anvil/example",
-  "cmake_target": "my_target",
-  "cmake_args": [],
+  "out_dir": ".out/anvil_build/example",
+  "cmake": {
+    "target": "my_target",
+    "build_type": "Release",
+    "args": []
+  },
   "env_setup": "",
   "include_dirs": [],
   "link_flags": "",
-
   "jobs": 0,
   "parallel_variants": 1,
   "stop_on_error": false,

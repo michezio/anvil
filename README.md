@@ -14,7 +14,7 @@ Perfect for:
 - **Multi-compiler support**: GCC, Clang, Zig, etc. (any compiler with a compatible CLI)
 - **Per-variant configuration**: Each variant specifies compiler, C++ standard, optimization flags, and defines
 - **Parallel builds**: Build multiple variants simultaneously for faster turnaround
-- **Auto-discovery**: Find `anvil.project.json` and `anvil.variants.<preset>.json` automatically
+- **Config discovery**: Looks for project config files named `anvil_project.json` or `anvil.project.json`, and variant files named `anvil_variants.json` or `anvil.variants.json` near the target or project directory
 - **Flexible output**: Artifacts and metadata collected in a single directory
 
 ## Installation
@@ -51,7 +51,7 @@ python -m anvil --target src/myapp.cpp
 
 Produces three binaries (O2, O3, Ofast):
 ```
-.out/anvil/myapp/
+.out/anvil_build/myapp/
   ├── myapp__o2_baseline
   ├── myapp__o3_baseline
   ├── myapp__ofast_fastmath
@@ -66,7 +66,7 @@ python -m anvil --target src/myproject/
 
 ### 3. Use custom variants
 
-Create `anvil.variants.quick.json` next to your source:
+Create a variants file such as `anvil_variants_quick.json` (the repository examples use the same underscore-based naming):
 
 ```json
 [
@@ -87,57 +87,65 @@ Create `anvil.variants.quick.json` next to your source:
 ]
 ```
 
-Then:
+Then point Anvil at it explicitly:
+
 ```bash
-python -m anvil --target src/myapp.cpp
+python -m anvil --target src/myapp.cpp --variants path/to/anvil_variants_quick.json
 ```
 
 ### 4. Control build behavior with config files
 
-Create `anvil.project.json` next to your source:
+Create `anvil_project.json` next to your source. The sample project config in this repository uses the same nested `cmake` shape:
 
 ```json
 {
   "name": "myproject",
-  "out_dir": ".out/myproject",
+  "build_dir": "/build/anvil/myproject",
+  "out_dir": ".out/anvil_build/myproject",
+  "cmake": {
+    "target": "my_target",
+    "build_type": "Release",
+    "args": []
+  },
   "include_dirs": ["/opt/deps/include"],
   "link_flags": "-L/opt/deps/lib -lmydep",
-  
   "jobs": 0,
   "parallel_variants": 4,
   "stop_on_error": false,
+  "clean": false,
   "verbose": false
 }
 ```
 
 Then:
 ```bash
-python -m anvil --target src/
+python -m anvil --target src/ --project path/to/anvil_project.json
 ```
 
 ## Configuration
 
-### `anvil.project.json`
+### `anvil_project.json`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | string | (inferred) | Project name, used in output paths |
-| `build_dir` | string | `/build/anvil` | CMake build directory (CMake mode) |
-| `out_dir` | string | `.out/anvil/<name>` | Output directory for artifacts |
-| `cmake_target` | string | `` | CMake target name (required for CMake mode) |
-| `cmake_args` | array | `[]` | Extra `cmake` configure args |
-| `env_setup` | string | `` | Script to source before building |
+| `name` | string | (inferred from parent directory) | Project name, used in output paths |
+| `build_dir` | string | `/build/anvil/<name>` | CMake build directory (CMake mode) |
+| `out_dir` | string | `.out/anvil_build/<name>` | Output directory for artifacts |
+| `cmake.target` | string | `""` | CMake target name (required for CMake mode) |
+| `cmake.build_type` | string | `Release` | CMake build type used in CMake mode |
+| `cmake.args` | array | `[]` | Extra `cmake` configure arguments |
+| `env_setup` | string | `""` | Script to source before building |
 | `include_dirs` | array | `[]` | Extra `-I` paths (direct mode) |
-| `link_flags` | string | `` | Extra linker flags |
-| `jobs` | int | `0` | Compile jobs per variant (0 = nproc) |
+| `link_flags` | string | `""` | Extra linker flags |
+| `jobs` | int | `0` | Compile jobs per variant (`0` = auto via `nproc`) |
 | `parallel_variants` | int | `1` | Number of variants to build simultaneously |
 | `stop_on_error` | bool | `false` | Abort on first variant failure |
 | `clean` | bool | `false` | Clean build directories before building |
 | `verbose` | bool | `false` | Print full compiler commands |
 
-### `anvil.variants.<preset>.json`
+### Variants JSON
 
-Array of variant objects. Example:
+Anvil reads a top-level JSON array of variant objects. The file can be named `anvil_variants.json` or `anvil.variants.json`, or passed explicitly via `--variants`.
 
 ```json
 [
@@ -154,35 +162,30 @@ Array of variant objects. Example:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | (required) | Variant identifier |
-| `compiler` | string | `g++` | Compiler command (supports multi-word like `zig c++`) |
-| `standard` | string | `c++23` | C++ standard flag (e.g., `c++20`, `c++23`) |
-| `cxx_flags` | string | `` | Compiler flags (e.g., `-O3 -march=native`) |
-| `defines` | array | `[]` | Preprocessor defines (e.g., `["NDEBUG", "MY_FLAG=1"]`) |
+| `compiler` | string | `g++` | Compiler command (supports multi-word forms like `zig c++`) |
+| `standard` | string | `c++23` | C++ standard flag (for example `c++20` or `c++23`) |
+| `cxx_flags` | string | `""` | Compiler flags (for example `-O3 -march=native`) |
+| `defines` | array | `[]` | Preprocessor defines (for example `["NDEBUG", "MY_FLAG=1"]`) |
 
 ## Command Line
 
 ```
-usage: anvil [-h] [--target TARGET] [--project-config PROJECT_CONFIG]
-             [--variants VARIANTS] [--preset PRESET]
-             [--build-type {Release,Debug,MinSizeRel,RelWithDebInfo}]
+usage: anvil [-h] [--target TARGET] [--project PROJECT] [--variants VARIANTS]
              [--clean] [--stop-on-error] [--jobs JOBS] [--parallel PARALLEL]
              [--verbose] [--extra-args [EXTRA_ARGS ...]]
 
 Build-matrix tool: compiles C/C++ targets with multiple variant configurations.
 
 options:
-  --target TARGET              Path to .cpp file or folder
-  --project-config PATH        Explicit project JSON config
-  --variants PATH              Explicit variants JSON path
-  --preset PRESET              Variant preset name (default: quick)
-  --build-type {Release,Debug,MinSizeRel,RelWithDebInfo}
-                               CMake build type (cmake mode only)
-  --clean                      Clean build dirs before building
+  --target TARGET              Path to a .cpp file, folder, or CMake project root
+  --project PROJECT            Path to an anvil_project.json or anvil.project.json file/folder
+  --variants VARIANTS          Path to an anvil_variants.json or anvil.variants.json file/folder
+  --clean                      Clean build directories before building
   --stop-on-error              Stop on first variant failure
   --jobs JOBS, -j JOBS         Compile jobs per variant (0 = nproc)
   --parallel PARALLEL, -p      Variants to build in parallel
   --verbose, -v                Print full compilation commands
-  --extra-args [...]           Extra compiler/linker arguments
+  --extra-args [...]           Extra compiler/linker arguments (direct mode only)
 ```
 
 ## Examples
@@ -193,16 +196,17 @@ See the `examples/` directory for sample configurations.
 
 ```bash
 python -m anvil --target benchmark.cpp \
-  --variants examples/anvil.variants.full.json \
+  --variants examples/anvil_variants_full.json \
   --parallel 4 --jobs 2
 ```
 
 ### CMake project with custom environment
 
 ```bash
-python -m anvil --project-config myproject/anvil.project.json \
-  --variants myproject/anvil.variants.quick.json \
-  --build-type Release --clean
+python -m anvil --target myproject \
+  --project myproject/anvil_project.json \
+  --variants myproject/anvil_variants_quick.json \
+  --clean
 ```
 
 ### Verbose output with stop-on-error
@@ -213,16 +217,16 @@ python -m anvil --target src/ --verbose --stop-on-error
 
 ## Output
 
-Artifacts are collected under `out_dir` (default: `.out/anvil/<name>`):
+Artifacts are collected under `out_dir` (default: `.out/anvil_build/<name>`):
 
 ```
-.out/anvil/myproject/
+.out/anvil_build/myproject/
   ├── myproject__o2_gcc
   ├── myproject__o3_gcc
-  ├── myproject__ofast_clang
+  ├── myproject__ofast_gcc
   ├── myproject__o2_gcc.json        # Metadata
   ├── myproject__o3_gcc.json
-  ├── myproject__ofast_clang.json
+  ├── myproject__ofast_gcc.json
   └── build_summary.json            # Build stats
 ```
 
