@@ -16,6 +16,7 @@ Perfect for:
 - **Parallel builds**: Build multiple variants simultaneously for faster turnaround
 - **Config discovery**: Looks for project config files named `anvil_project.json` or `anvil.project.json`, and variant files named `anvil_variants.json` or `anvil.variants.json` near the target or project directory
 - **Flexible output**: Artifacts and metadata collected in a single directory
+- **Cross-platform CMake execution**: Works with single-config and multi-config generators (Linux/macOS/Windows)
 
 ## Installation
 
@@ -49,12 +50,14 @@ anvil --target myfile.cpp
 python -m anvil --target src/myapp.cpp
 ```
 
-Produces three binaries (O2, O3, Ofast):
+Produces five binaries (O0, O1, O2, O3, Ofast):
 ```
 .out/anvil_build/myapp/
-  ├── myapp__o2_baseline
-  ├── myapp__o3_baseline
-  ├── myapp__ofast_fastmath
+  ├── myapp__gcc_O0
+  ├── myapp__gcc_O1
+  ├── myapp__gcc_O2
+  ├── myapp__gcc_O3
+  ├── myapp__gcc_Ofast
   └── build_summary.json
 ```
 
@@ -139,16 +142,29 @@ python -m anvil --target src/ --project path/to/anvil_project.json
 | `build_dir` | string | `/build/anvil/<name>` | CMake build directory (CMake mode) |
 | `out_dir` | string | `.out/anvil_build/<name>` | Output directory for artifacts |
 | `cmake.target` | string | `""` | CMake target name (required for CMake mode) |
-| `cmake.build_type` | string | `Release` | CMake build type used in CMake mode |
+| `cmake.build_type` | string | `""` | Explicit CMake build type. If unset, Anvil still uses a fallback config name (`Release`) for config-specific flag injection and `--config` build selection. |
 | `cmake.args` | array | `[]` | Extra `cmake` configure arguments |
 | `env_setup` | string | `""` | Script to source before building |
 | `include_dirs` | array | `[]` | Extra `-I` paths (direct mode) |
 | `link_flags` | string | `""` | Extra linker flags |
-| `jobs` | int | `0` | Compile jobs per variant (`0` = auto via `nproc`) |
+| `jobs` | int | `0` | Compile jobs per variant (`0` = auto via Python CPU count) |
 | `parallel_variants` | int | `1` | Number of variants to build simultaneously |
 | `stop_on_error` | bool | `false` | Abort on first variant failure |
 | `clean` | bool | `false` | Clean build directories before building |
 | `verbose` | bool | `false` | Print full compiler commands |
+
+### CMake Flag Behavior (Config-Aware)
+
+In CMake mode, Anvil computes `effective_flags` from each variant (`cxx_flags` + `defines`) and applies them to `CMAKE_CXX_FLAGS_<CONFIG>` and `CMAKE_C_FLAGS_<CONFIG>`.
+
+- **Standard configs** (`Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`):
+  Anvil **appends** injected flags to existing CMake/toolchain defaults.
+  This preserves defaults like release-style optimization and `NDEBUG`.
+
+- **Custom configs** (for example `AnvilCustom`):
+  Anvil treats these as a **blank state** and sets config-specific flags from the variant payload, without inheriting standard-config defaults.
+
+This lets you keep normal CMake behavior for standard profiles, while using custom profiles for controlled experiments.
 
 ### Variants JSON
 
@@ -279,6 +295,12 @@ Each `.json` file contains:
 - Effective flags and defines
 - Build directory
 - Artifact path
+
+## Testing & CI
+
+- Pytest suite covers direct mode and CMake mode, including positive and negative build paths.
+- CMake tests validate config-specific flag behavior for standard and custom build types.
+- GitHub Actions runs a cross-platform matrix (Ubuntu, Windows, macOS) and multiple Python versions.
 
 ## License
 
