@@ -132,3 +132,41 @@ def test_cmake_flags_without_explicit_build_type(
         assert "CMAKE_BUILD_TYPE:STRING=" in cache_text
         assert "CMAKE_BUILD_TYPE:STRING=Release" not in cache_text
         assert build_failed is True
+
+
+def test_cmake_release_fails_when_required_anvil_define_missing(
+    tmp_path: Path,
+    available_compiler: str,
+    cmake_flags_asset_root: Path,
+) -> None:
+    if shutil.which("cmake") is None:
+        pytest.skip("cmake is required for this test")
+    assert cmake_flags_asset_root.exists()
+
+    build_base = tmp_path / "build"
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    config = ProjectConfig(
+        name="cmake_negative_test",
+        build_dir=str(build_base),
+        cmake_target="anvil_cmake_flags",
+        cmake_build_type="Release",
+        jobs=1,
+    )
+    variant = BuildVariant(
+        name="cmake_missing_define_variant",
+        compiler=available_compiler,
+        standard="c++20",
+        cxx_flags=(),
+        defines=(),
+    )
+
+    with pytest.raises(RuntimeError):
+        build_cmake(
+            root=cmake_flags_asset_root,
+            config=config,
+            out_dir=out_dir,
+            variant=variant,
+            build_type="Release",
+        )
