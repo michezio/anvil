@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anvil-matrix"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Build-matrix tool for C/C++ projects — compile with multiple compiler/flag variants."
 readme = "README.md"
 license = {text = "MIT"}
@@ -37,3 +37,6 @@ anvil = "anvil.anvil:main"
 
 [tool.setuptools]
 packages = ["anvil"]
+
+[tool.setuptools.dynamic]
+version = {attr = "anvil.__version__"}

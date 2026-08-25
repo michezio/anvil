@@ -83,7 +83,7 @@ When you're ready to publish:
 
 1. Update `pyproject.toml`:
    - Change repository URLs to your GitHub repo
-   - Bump version if needed
+   - Bump version in `anvil/__init__.py` (`__version__`) if needed
 
 2. Create a `setup.py` (optional, if not using pyproject.toml):
    ```python
