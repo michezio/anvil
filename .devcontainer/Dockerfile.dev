@@ -1,0 +1,38 @@
+FROM ubuntu:latest AS devcontainer
+
+# Setup UTF-8 locale
+RUN apt-get update && apt-get install -y --no-install-recommends locales && rm -rf /var/lib/apt/lists/*
+RUN bash -c "sed -i -e \"s/# en_US.UTF-8.*/en_US.UTF-8 UTF-8/\" /etc/locale.gen"
+RUN dpkg-reconfigure --frontend=noninteractive locales
+RUN update-locale en_US.UTF-8
+ENV LANG=en_US.UTF-8
+
+# Install essential packages
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
+    build-essential gcc gdb cmake git nano file wget curl xz-utils ripgrep \
+    clang-format clang-tidy \
+    python3 python3-pip python3-venv python3-dev python3-pytest \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Zig
+RUN set -e; \
+    ZIG_VERSION="0.16.0"; \
+    ARCH=$(uname -m); \
+    case "$ARCH" in \
+        x86_64)  ZIG_ARCH="x86_64" ;; \
+        aarch64) ZIG_ARCH="aarch64" ;; \
+        armv7l)  ZIG_ARCH="armv7a" ;; \
+        riscv64) ZIG_ARCH="riscv64" ;; \
+        *) echo "Unsupported architecture: $ARCH" && exit 1 ;; \
+    esac; \
+    ZIG_TARBALL="zig-${ZIG_ARCH}-linux-${ZIG_VERSION}.tar.xz"; \
+    wget "https://ziglang.org/download/${ZIG_VERSION}/${ZIG_TARBALL}"; \
+    tar -xf "${ZIG_TARBALL}"; \
+    mv "zig-${ZIG_ARCH}-linux-${ZIG_VERSION}" "/usr/local/bin/zig.${ZIG_VERSION}"; \
+    ln -s "/usr/local/bin/zig.${ZIG_VERSION}/zig" /usr/local/bin/zig; \
+    rm -rf "${ZIG_TARBALL}"
+
+
+# Set up shell
+ENV SHELL=/bin/bash
+SHELL ["/bin/bash", "-c"]
