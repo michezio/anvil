@@ -85,37 +85,40 @@ def build_cmake(
     jobs = effective_jobs(config.jobs)
     variant_defaults = BuildVariant()
 
-    compiler_override = ""
+    cmake_config_cmd = ["cmake", "-S", str(root), "-B", str(build_dir)]
     if variant.compiler and variant.compiler != variant_defaults.compiler:
-        compiler_override = f"-DCMAKE_CXX_COMPILER={sh_quote(variant.compiler)} "
+        cmake_config_cmd.append(f"-DCMAKE_CXX_COMPILER={variant.compiler}")
 
-    cmake_args_joined = " ".join(sh_quote(arg) for arg in config.cmake_args)
+    cmake_config_cmd.extend(config.cmake_args)
 
-    cmake_cmd = (
-        f"cmake -S {sh_quote(str(root))} -B {sh_quote(str(build_dir))} "
-        f"{compiler_override}"
-        f"{cmake_args_joined}"
-    )
+    selected_config = config.cmake_build_type or build_type
     if config.cmake_build_type:
-        cmake_cmd = f"{cmake_cmd} -DCMAKE_BUILD_TYPE={sh_quote(config.cmake_build_type)}"
+        cmake_config_cmd.append(f"-DCMAKE_BUILD_TYPE={config.cmake_build_type}")
 
-    config_name_upper = (config.cmake_build_type or build_type).upper()
-    cmake_config = (
-        f"{cmake_cmd} "
-        f"-DCMAKE_CXX_FLAGS_{config_name_upper}:STRING={sh_quote(effective_flags)} "
-        #f"-DCMAKE_C_FLAGS_{config_name_upper}:STRING={sh_quote(effective_flags)}"
-    )
-    cmake_build = (
-        f"cmake --build {sh_quote(str(build_dir))} --parallel {jobs}"
-        f" --target {sh_quote(config.cmake_target)}"
-    )
+    config_name_upper = selected_config.upper()
+    cmake_config_cmd.append(f"-DCMAKE_CXX_FLAGS_{config_name_upper}:STRING={effective_flags}")
+    cmake_config_cmd.append(f"-DCMAKE_C_FLAGS_{config_name_upper}:STRING={effective_flags}")
+
+    cmake_build_cmd = [
+        "cmake",
+        "--build",
+        str(build_dir),
+        "--parallel",
+        str(jobs),
+        "--target",
+        config.cmake_target,
+    ]
+    if selected_config:
+        cmake_build_cmd.extend(["--config", selected_config])
 
     if config.env_setup:
-        cmake_config = f"source {sh_quote(config.env_setup)} && {cmake_config}"
-        cmake_build = f"source {sh_quote(config.env_setup)} && {cmake_build}"
-
-    run_bash(cmake_config, verbose=config.verbose)
-    run_bash(cmake_build, verbose=config.verbose)
+        cmake_config = " ".join(sh_quote(token) for token in cmake_config_cmd)
+        cmake_build = " ".join(sh_quote(token) for token in cmake_build_cmd)
+        run_bash(f"source {sh_quote(config.env_setup)} && {cmake_config}", verbose=config.verbose)
+        run_bash(f"source {sh_quote(config.env_setup)} && {cmake_build}", verbose=config.verbose)
+    else:
+        run_cmd(cmake_config_cmd, verbose=config.verbose)
+        run_cmd(cmake_build_cmd, verbose=config.verbose)
 
     out_bin = out_dir / f"{config.cmake_target}__{variant.name}"
     built_bin = _find_cmake_artifact(build_dir, config.cmake_target)

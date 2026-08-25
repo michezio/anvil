@@ -3,6 +3,7 @@ from pathlib import Path
 
 from anvil.build import build_direct
 from anvil.models import BuildVariant, ProjectConfig
+from conftest import resolve_artifact_path
 
 
 def test_direct_build_variant_flags_and_defines(tmp_path: Path, available_compiler: str) -> None:
@@ -44,7 +45,7 @@ int main() {
         config=config,
     )
 
-    artifact = Path(metadata["artifact"])
+    artifact = resolve_artifact_path(Path(metadata["artifact"]))
     assert artifact.exists()
     assert artifact.stat().st_size > 0
 
