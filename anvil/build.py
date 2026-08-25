@@ -7,9 +7,10 @@ from .models import BuildVariant, ProjectConfig
 from .utils import effective_jobs, resolve_compiler_command, run_bash, run_cmd, sh_quote
 
 
-def compose_effective_flags(cxx_flags: str, defines: tuple[str, ...]) -> str:
+def compose_effective_flags(cxx_flags: tuple[str, ...], defines: tuple[str, ...]) -> str:
+    flags = " ".join(cxx_flags)
     define_flags = " ".join(f"-D{d}" for d in defines)
-    parts = [p for p in [cxx_flags.strip(), define_flags.strip()] if p]
+    parts = [p for p in [flags.strip(), define_flags.strip()] if p]
     return " ".join(parts)
 
 
@@ -32,8 +33,8 @@ def build_direct(
     if variant.standard:
         cmd.append(f"-std={variant.standard}")
 
-    if effective_flags:
-        cmd.extend(effective_flags.split())
+    cmd.extend(variant.cxx_flags)
+    cmd.extend(f"-D{d}" for d in variant.defines)
 
     cmd.extend(["-fdiagnostics-color=always", "-g"])
 
@@ -56,7 +57,7 @@ def build_direct(
         "name": variant.name,
         "compiler": variant.compiler,
         "standard": variant.standard,
-        "cxx_flags": variant.cxx_flags,
+        "cxx_flags": list(variant.cxx_flags),
         "defines": list(variant.defines),
         "effective_flags": effective_flags,
         "sources": [str(s) for s in sources],
@@ -134,7 +135,7 @@ def build_cmake(
         "compiler": variant.compiler,
         "standard": variant.standard,
         "build_type": build_type,
-        "cxx_flags": variant.cxx_flags,
+        "cxx_flags": list(variant.cxx_flags),
         "defines": list(variant.defines),
         "effective_flags": effective_flags,
         "build_dir": str(build_dir),

@@ -1,73 +1,71 @@
-[
-  {
-    "name": "gcc_O0",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O0",
-    "defines": []
-  },
-  {
-    "name": "gcc_O1",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O1",
-    "defines": []
-  },
-  {
-    "name": "gcc_O2",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O2",
-    "defines": []
-  },
-  {
-    "name": "gcc_O3",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O3",
-    "defines": []
-  },
-  {
-    "name": "gcc_Ofast",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-Ofast -ffast-math",
-    "defines": []
-  },
-  
-  {
-    "name": "zig_O0",
-    "compiler": "zig c++",
-    "standard": "c++23",
-    "cxx_flags": "-O0",
-    "defines": []
-  },
-  {
-    "name": "zig_O1",
-    "compiler": "zig c++",
-    "standard": "c++23",
-    "cxx_flags": "-O1",
-    "defines": []
-  },
-  {
-    "name": "zig_O2",
-    "compiler": "zig c++",
-    "standard": "c++23",
-    "cxx_flags": "-O2",
-    "defines": []
-  },
-  {
-    "name": "zig_O3",
-    "compiler": "zig c++",
-    "standard": "c++23",
-    "cxx_flags": "-O3",
-    "defines": []
-  },
-  {
-    "name": "zig_Ofast",
-    "compiler": "zig c++",
-    "standard": "c++23",
-    "cxx_flags": "-Ofast -ffast-math",
-    "defines": []
-  }
-]
+{
+  "bases": [
+    {
+      "name": "base_gcc",
+      "compiler": "g++",
+      "standard": "c++23",
+      "cxx_flags": [],
+      "defines": []
+    },
+    {
+      "name": "base_zig",
+      "compiler": "zig c++",
+      "standard": "c++23",
+      "cxx_flags": [],
+      "defines": []
+    }
+  ],
+  "variants": [
+    {
+      "name": "gcc_O0",
+      "base": "base_gcc",
+      "cxx_flags": ["-O0"]
+    },
+    {
+      "name": "gcc_O1",
+      "base": "base_gcc",
+      "cxx_flags": ["-O1"]
+    },
+    {
+      "name": "gcc_O2",
+      "base": "base_gcc",
+      "cxx_flags": ["-O2"]
+    },
+    {
+      "name": "gcc_O3",
+      "base": "base_gcc",
+      "cxx_flags": ["-O3"]
+    },
+    {
+      "name": "gcc_Ofast",
+      "base": "base_gcc",
+      "cxx_flags": ["-Ofast", "-ffast-math"]
+    },
+
+    {
+      "name": "zig_O0",
+      "base": "base_zig",
+      "cxx_flags": ["-O0"]
+    },
+    {
+      "name": "zig_O1",
+      "base": "base_zig",
+      "cxx_flags": ["-O1"]
+    },
+    {
+      "name": "zig_O2",
+      "base": "base_zig",
+      "cxx_flags": ["-O2"]
+    },
+    {
+      "name": "zig_O3",
+      "base": "base_zig",
+      "cxx_flags": ["-O3"]
+    },
+    {
+      "name": "zig_Ofast",
+      "base": "base_zig",
+      "cxx_flags": ["-Ofast", "-ffast-math"]
+    }
+  ]
+}

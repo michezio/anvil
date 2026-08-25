@@ -108,15 +108,65 @@ def parse_project_config(path: Path) -> ProjectConfig:
 
 def parse_variants(path: Path) -> list[BuildVariant]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, list):
-        raise ValueError("Variants JSON must be a list")
-    return _parse_variants_list(data, source=str(path))
+    if not isinstance(data, dict):
+        raise ValueError("Variants JSON must be an object with 'variants' list and optional 'bases' list")
+    return _parse_variants_config(data, source=str(path))
 
 
-def _parse_variants_list(data: list, source: str = "<builtin>") -> list[BuildVariant]:
+def _parse_string_list(raw: object, *, key: str, owner: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{owner} key '{key}' must be a list")
+    values: list[str] = []
+    for value in raw:
+        text = str(value).strip()
+        if text:
+            values.append(text)
+    return tuple(values)
+
+
+def _parse_base_entry(item: dict, *, source: str, defaults: BuildVariant) -> BuildVariant:
+    name = str(item.get("name", "")).strip()
+    if not name:
+        raise ValueError(f"Base entry in {source} missing non-empty 'name'")
+
+    compiler = str(item.get("compiler", defaults.compiler)).strip() or defaults.compiler
+    standard = str(item.get("standard", defaults.standard)).strip() or defaults.standard
+    cxx_flags = _parse_string_list(item.get("cxx_flags", []), key="cxx_flags", owner=f"Base '{name}'")
+    defines = _parse_string_list(item.get("defines", []), key="defines", owner=f"Base '{name}'")
+
+    return BuildVariant(
+        name=name,
+        compiler=compiler,
+        standard=standard,
+        cxx_flags=cxx_flags,
+        defines=defines,
+    )
+
+
+def _parse_variants_config(data: dict, source: str = "<builtin>") -> list[BuildVariant]:
     variant_defaults = BuildVariant()
+
+    bases_raw = data.get("bases", [])
+    if not isinstance(bases_raw, list):
+        raise ValueError(f"'bases' in {source} must be a list")
+
+    variants_raw = data.get("variants")
+    if not isinstance(variants_raw, list):
+        raise ValueError(f"'variants' in {source} must be a list")
+
+    bases_by_name: dict[str, BuildVariant] = {}
+    for item in bases_raw:
+        if not isinstance(item, dict):
+            raise ValueError(f"Each base entry in {source} must be an object")
+        base = _parse_base_entry(item, source=source, defaults=variant_defaults)
+        if base.name in bases_by_name:
+            raise ValueError(f"Duplicate base name '{base.name}' in {source}")
+        bases_by_name[base.name] = base
+
     variants: list[BuildVariant] = []
-    for i, item in enumerate(data):
+    for i, item in enumerate(variants_raw):
         if not isinstance(item, dict):
             raise ValueError(f"Variant entry {i} in {source} must be an object")
 
@@ -124,14 +174,25 @@ def _parse_variants_list(data: list, source: str = "<builtin>") -> list[BuildVar
         if not name:
             raise ValueError(f"Variant entry {i} in {source} missing non-empty 'name'")
 
-        compiler = str(item.get("compiler", variant_defaults.compiler)).strip()
-        standard = str(item.get("standard", variant_defaults.standard)).strip()
-        cxx_flags = str(item.get("cxx_flags", "")).strip()
-        defines_raw = item.get("defines", [])
-        if not isinstance(defines_raw, list):
-            raise ValueError(f"Variant '{name}' key 'defines' must be a list")
+        base_name = item.get("base")
+        if base_name is not None:
+            base_key = str(base_name).strip()
+            if not base_key:
+                raise ValueError(f"Variant '{name}' has empty 'base' value")
+            base = bases_by_name.get(base_key)
+            if base is None:
+                raise ValueError(f"Variant '{name}' references unknown base '{base_key}' in {source}")
+        else:
+            base = variant_defaults
 
-        defines = tuple(str(d).strip() for d in defines_raw if str(d).strip())
+        compiler = str(item.get("compiler", base.compiler)).strip() or base.compiler
+        standard = str(item.get("standard", base.standard)).strip() or base.standard
+        variant_cxx_flags = _parse_string_list(item.get("cxx_flags", []), key="cxx_flags", owner=f"Variant '{name}'")
+        variant_defines = _parse_string_list(item.get("defines", []), key="defines", owner=f"Variant '{name}'")
+
+        cxx_flags = base.cxx_flags + variant_cxx_flags
+        defines = base.defines + variant_defines
+
         variants.append(
             BuildVariant(
                 name=name,
@@ -146,4 +207,4 @@ def _parse_variants_list(data: list, source: str = "<builtin>") -> list[BuildVar
 
 
 def default_variants() -> list[BuildVariant]:
-    return _parse_variants_list(DEFAULT_VARIANTS_DATA)
+    return _parse_variants_config(DEFAULT_VARIANTS_DATA)

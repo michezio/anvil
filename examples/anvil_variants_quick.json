@@ -1,23 +1,28 @@
-[
-  {
-    "name": "gcc_O2",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O2",
-    "defines": []
-  },
-  {
-    "name": "gcc_O3",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O3",
-    "defines": []
-  },
-  {
-    "name": "gcc_Ofast",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-Ofast -ffast-math",
-    "defines": []
-  }
-]
+{
+  "bases": [
+    {
+      "name": "base_gcc",
+      "compiler": "g++",
+      "standard": "c++23",
+      "cxx_flags": [],
+      "defines": []
+    }
+  ],
+  "variants": [
+    {
+      "name": "gcc_O2",
+      "base": "base_gcc",
+      "cxx_flags": ["-O2"]
+    },
+    {
+      "name": "gcc_O3",
+      "base": "base_gcc",
+      "cxx_flags": ["-O3"]
+    },
+    {
+      "name": "gcc_Ofast",
+      "base": "base_gcc",
+      "cxx_flags": ["-Ofast", "-ffast-math"]
+    }
+  ]
+}

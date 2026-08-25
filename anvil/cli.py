@@ -40,7 +40,7 @@ Variant format (with optional compiler/standard):
     "name": "o3_clang",
     "compiler": "clang++",
     "standard": "c++23",
-    "cxx_flags": "-O3",
+        "cxx_flags": ["-O3"],
     "defines": []
   }
 

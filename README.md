@@ -69,22 +69,29 @@ python -m anvil --target src/myproject/
 Create a variants file such as `anvil_variants_quick.json` (the repository examples use the same underscore-based naming):
 
 ```json
-[
-  {
-    "name": "gcc_o3",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O3",
-    "defines": []
-  },
-  {
-    "name": "clang_o3",
-    "compiler": "clang++",
-    "standard": "c++23",
-    "cxx_flags": "-O3",
-    "defines": []
-  }
-]
+{
+  "bases": [
+    {
+      "name": "base_gcc",
+      "compiler": "g++",
+      "standard": "c++23",
+      "cxx_flags": [],
+      "defines": []
+    }
+  ],
+  "variants": [
+    {
+      "name": "gcc_O3",
+      "base": "base_gcc",
+      "cxx_flags": ["-O3"]
+    },
+    {
+      "name": "gcc_Ofast",
+      "base": "base_gcc",
+      "cxx_flags": ["-Ofast", "-ffast-math"]
+    }
+  ]
+}
 ```
 
 Then point Anvil at it explicitly:
@@ -145,27 +152,59 @@ python -m anvil --target src/ --project path/to/anvil_project.json
 
 ### Variants JSON
 
-Anvil reads a top-level JSON array of variant objects. The file can be named `anvil_variants.json` or `anvil.variants.json`, or passed explicitly via `--variants`.
+Anvil reads a top-level JSON object with a required `variants` array and an optional `bases` array. The file can be named `anvil_variants.json` or `anvil.variants.json`, or passed explicitly via `--variants`.
 
 ```json
-[
-  {
-    "name": "o3_baseline",
-    "compiler": "g++",
-    "standard": "c++23",
-    "cxx_flags": "-O3",
-    "defines": ["MY_DEFINE=1"]
-  }
-]
+{
+  "bases": [
+    {
+      "name": "base_gcc",
+      "compiler": "g++",
+      "standard": "c++23",
+      "cxx_flags": ["-Wall"],
+      "defines": ["BASE=1"]
+    }
+  ],
+  "variants": [
+    {
+      "name": "gcc_O3",
+      "base": "base_gcc",
+      "cxx_flags": ["-O3"],
+      "defines": ["OPT=3"]
+    },
+    {
+      "name": "clang_O2",
+      "compiler": "clang++",
+      "standard": "c++20",
+      "cxx_flags": ["-O2"],
+      "defines": []
+    }
+  ]
+}
 ```
+
+`base` behavior: if a variant sets `base`, then `cxx_flags` and `defines` are appended to the base values, and `compiler`/`standard` inherit from the base unless overridden.
+
+Base fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | (required) | Base identifier |
+| `compiler` | string | `g++` | Compiler command (supports multi-word forms like `zig c++`) |
+| `standard` | string | `c++23` | C++ standard flag (for example `c++20` or `c++23`) |
+| `cxx_flags` | array | `[]` | Base compiler flags |
+| `defines` | array | `[]` | Base preprocessor defines |
+
+Variant fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | (required) | Variant identifier |
-| `compiler` | string | `g++` | Compiler command (supports multi-word forms like `zig c++`) |
-| `standard` | string | `c++23` | C++ standard flag (for example `c++20` or `c++23`) |
-| `cxx_flags` | string | `""` | Compiler flags (for example `-O3 -march=native`) |
-| `defines` | array | `[]` | Preprocessor defines (for example `["NDEBUG", "MY_FLAG=1"]`) |
+| `base` | string | unset | Optional base name to inherit from |
+| `compiler` | string | inherited / `g++` | Compiler command |
+| `standard` | string | inherited / `c++23` | C++ standard flag |
+| `cxx_flags` | array | `[]` | Variant flags appended to base flags |
+| `defines` | array | `[]` | Variant defines appended to base defines |
 
 ## Command Line
 

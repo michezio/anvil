@@ -6,7 +6,7 @@ class BuildVariant:
     name: str = ""
     compiler: str = "g++"
     standard: str = "c++23"
-    cxx_flags: str = ""
+    cxx_flags: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
 
 
