@@ -221,12 +221,12 @@ Artifacts are collected under `out_dir` (default: `.out/anvil_build/<name>`):
 
 ```
 .out/anvil_build/myproject/
-  ├── myproject__o2_gcc
-  ├── myproject__o3_gcc
-  ├── myproject__ofast_gcc
-  ├── myproject__o2_gcc.json        # Metadata
-  ├── myproject__o3_gcc.json
-  ├── myproject__ofast_gcc.json
+  ├── myproject__gcc_O2
+  ├── myproject__gcc_O3
+  ├── myproject__gcc_Ofast
+  ├── myproject__gcc_O2.json        # Metadata
+  ├── myproject__gcc_O3.json
+  ├── myproject__gcc_Ofast.json
   └── build_summary.json            # Build stats
 ```
 

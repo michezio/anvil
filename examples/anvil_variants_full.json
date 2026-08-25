@@ -1,44 +1,73 @@
 [
   {
-    "name": "o2_gcc",
+    "name": "gcc_O0",
+    "compiler": "g++",
+    "standard": "c++23",
+    "cxx_flags": "-O0",
+    "defines": []
+  },
+  {
+    "name": "gcc_O1",
+    "compiler": "g++",
+    "standard": "c++23",
+    "cxx_flags": "-O1",
+    "defines": []
+  },
+  {
+    "name": "gcc_O2",
     "compiler": "g++",
     "standard": "c++23",
     "cxx_flags": "-O2",
     "defines": []
   },
   {
-    "name": "o3_gcc",
+    "name": "gcc_O3",
     "compiler": "g++",
     "standard": "c++23",
     "cxx_flags": "-O3",
     "defines": []
   },
   {
-    "name": "ofast_gcc",
+    "name": "gcc_Ofast",
     "compiler": "g++",
     "standard": "c++23",
-    "cxx_flags": "-Ofast -ffast-math -fno-math-errno -fno-trapping-math",
+    "cxx_flags": "-Ofast -ffast-math",
+    "defines": []
+  },
+  
+  {
+    "name": "zig_O0",
+    "compiler": "zig c++",
+    "standard": "c++23",
+    "cxx_flags": "-O0",
     "defines": []
   },
   {
-    "name": "o3_no_vectorize_gcc",
-    "compiler": "g++",
+    "name": "zig_O1",
+    "compiler": "zig c++",
     "standard": "c++23",
-    "cxx_flags": "-O3 -fno-tree-vectorize",
+    "cxx_flags": "-O1",
     "defines": []
   },
   {
-    "name": "o2_zig",
+    "name": "zig_O2",
     "compiler": "zig c++",
     "standard": "c++23",
     "cxx_flags": "-O2",
     "defines": []
   },
   {
-    "name": "o3_zig",
+    "name": "zig_O3",
     "compiler": "zig c++",
     "standard": "c++23",
     "cxx_flags": "-O3",
+    "defines": []
+  },
+  {
+    "name": "zig_Ofast",
+    "compiler": "zig c++",
+    "standard": "c++23",
+    "cxx_flags": "-Ofast -ffast-math",
     "defines": []
   }
 ]
