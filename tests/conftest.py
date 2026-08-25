@@ -33,3 +33,24 @@ def resolve_artifact_path(artifact_path: Path) -> Path:
         return exe_candidate
 
     return artifact_path
+
+
+def normalize_flag_tokens(flag_string: str) -> set[str]:
+    """Normalize common flag spellings so assertions are compiler-agnostic."""
+    normalized: set[str] = set()
+    for raw in flag_string.split():
+        token = raw.strip()
+        if not token:
+            continue
+
+        upper = token.upper()
+        if upper.startswith("/D") and len(token) > 2:
+            normalized.add(f"-D{token[2:]}")
+            continue
+
+        if upper.startswith("/O") and len(token) > 2:
+            normalized.add(f"-O{token[2:]}")
+            continue
+
+        normalized.add(token)
+    return normalized

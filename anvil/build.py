@@ -96,8 +96,6 @@ def build_cmake(
         cmake_config_cmd.append(f"-DCMAKE_BUILD_TYPE={config.cmake_build_type}")
 
     config_name_upper = selected_config.upper()
-    cmake_config_cmd.append(f"-DCMAKE_CXX_FLAGS_{config_name_upper}:STRING={effective_flags}")
-    cmake_config_cmd.append(f"-DCMAKE_C_FLAGS_{config_name_upper}:STRING={effective_flags}")
 
     cmake_build_cmd = [
         "cmake",
@@ -111,13 +109,39 @@ def build_cmake(
     if selected_config:
         cmake_build_cmd.extend(["--config", selected_config])
 
+    def _run_configure(args: list[str]) -> None:
+        if config.env_setup:
+            configure_cmd = " ".join(sh_quote(token) for token in args)
+            run_bash(f"source {sh_quote(config.env_setup)} && {configure_cmd}", verbose=config.verbose)
+        else:
+            run_cmd(args, verbose=config.verbose)
+
+    _run_configure(cmake_config_cmd)
+
+    cache_file = build_dir / "CMakeCache.txt"
+    cxx_key = f"CMAKE_CXX_FLAGS_{config_name_upper}"
+    c_key = f"CMAKE_C_FLAGS_{config_name_upper}"
+
+    existing_cxx_flags = _read_cmake_cache_value(cache_file, cxx_key)
+    existing_c_flags = _read_cmake_cache_value(cache_file, c_key)
+
+    is_standard_config = config_name_upper in {"DEBUG", "RELEASE", "RELWITHDEBINFO", "MINSIZEREL"}
+    if is_standard_config:
+        merged_cxx_flags = _merge_flag_strings(existing_cxx_flags, effective_flags)
+        merged_c_flags = _merge_flag_strings(existing_c_flags, effective_flags)
+    else:
+        merged_cxx_flags = effective_flags
+        merged_c_flags = effective_flags
+
+    second_configure_cmd = [*cmake_config_cmd]
+    second_configure_cmd.append(f"-D{cxx_key}:STRING={merged_cxx_flags}")
+    second_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
+    _run_configure(second_configure_cmd)
+
     if config.env_setup:
-        cmake_config = " ".join(sh_quote(token) for token in cmake_config_cmd)
         cmake_build = " ".join(sh_quote(token) for token in cmake_build_cmd)
-        run_bash(f"source {sh_quote(config.env_setup)} && {cmake_config}", verbose=config.verbose)
         run_bash(f"source {sh_quote(config.env_setup)} && {cmake_build}", verbose=config.verbose)
     else:
-        run_cmd(cmake_config_cmd, verbose=config.verbose)
         run_cmd(cmake_build_cmd, verbose=config.verbose)
 
     out_bin = out_dir / f"{config.cmake_target}__{variant.name}"
@@ -158,5 +182,22 @@ def _find_cmake_artifact(build_dir: Path, target_name: str) -> Path | None:
             if candidate.is_file():
                 return candidate
     return None
+
+
+def _read_cmake_cache_value(cache_file: Path, key: str) -> str:
+    if not cache_file.exists():
+        return ""
+
+    prefix = f"{key}:"
+    for line in cache_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if line.startswith(prefix):
+            _, _, value = line.partition("=")
+            return value.strip()
+    return ""
+
+
+def _merge_flag_strings(existing: str, injected: str) -> str:
+    parts = [p.strip() for p in (existing, injected) if p and p.strip()]
+    return " ".join(parts)
 
 

@@ -16,6 +16,12 @@
 #endif
 #endif
 
+#ifdef ANVIL_EXPECT_NDEBUG
+#ifndef NDEBUG
+#error NDEBUG must remain enabled for release-like configurations
+#endif
+#endif
+
 int main() {
     return 0;
 }

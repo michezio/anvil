@@ -6,7 +6,15 @@ import pytest
 
 from anvil.build import build_cmake
 from anvil.models import BuildVariant, ProjectConfig
-from conftest import resolve_artifact_path
+from conftest import normalize_flag_tokens, resolve_artifact_path
+
+
+def _cache_value(cache_text: str, key: str) -> str:
+    prefix = f"{key}:"
+    for line in cache_text.splitlines():
+        if line.startswith(prefix):
+            return line.partition("=")[2]
+    return ""
 
 
 def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
@@ -34,7 +42,7 @@ def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
         compiler=available_compiler,
         standard="c++20",
         cxx_flags=("-DFROM_ANVIL_CXXFLAGS=1", "-O3"),
-        defines=("FROM_ANVIL_DEFINES=1", "ANVIL_EXPECT_RELEASE=1"),
+        defines=("FROM_ANVIL_DEFINES=1", "ANVIL_EXPECT_RELEASE=1", "ANVIL_EXPECT_NDEBUG=1"),
     )
 
     metadata = build_cmake(
@@ -53,17 +61,22 @@ def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
     saved = json.loads(metadata_file.read_text(encoding="utf-8"))
     assert (
         saved["effective_flags"]
-        == "-DFROM_ANVIL_CXXFLAGS=1 -O3 -DFROM_ANVIL_DEFINES=1 -DANVIL_EXPECT_RELEASE=1"
+        == "-DFROM_ANVIL_CXXFLAGS=1 -O3 -DFROM_ANVIL_DEFINES=1 -DANVIL_EXPECT_RELEASE=1 -DANVIL_EXPECT_NDEBUG=1"
     )
     assert saved["compiler"] == available_compiler
 
     cache_file = Path(saved["build_dir"]) / "CMakeCache.txt"
     cache_text = cache_file.read_text(encoding="utf-8")
+    release_flags = _cache_value(cache_text, "CMAKE_CXX_FLAGS_RELEASE")
+    release_tokens = normalize_flag_tokens(release_flags)
 
     assert "CMAKE_CXX_FLAGS_RELEASE:STRING=" in cache_text
-    assert "-DFROM_ANVIL_CXXFLAGS=1" in cache_text
-    assert "-DFROM_ANVIL_DEFINES=1" in cache_text
-    assert "-DANVIL_EXPECT_RELEASE=1" in cache_text
+    assert "-DFROM_ANVIL_CXXFLAGS=1" in release_tokens
+    assert "-DFROM_ANVIL_DEFINES=1" in release_tokens
+    assert "-DANVIL_EXPECT_RELEASE=1" in release_tokens
+    assert "-DANVIL_EXPECT_NDEBUG=1" in release_tokens
+    # Standard release defaults should be preserved and Anvil flags appended.
+    assert "-DNDEBUG" in release_tokens
 
     if "CMAKE_BUILD_TYPE:STRING=" in cache_text:
         assert "CMAKE_BUILD_TYPE:STRING=Release" in cache_text
@@ -170,3 +183,57 @@ def test_cmake_release_fails_when_required_anvil_define_missing(
             variant=variant,
             build_type="Release",
         )
+
+
+def test_cmake_custom_config_uses_anvil_blank_state(
+    tmp_path: Path,
+    available_compiler: str,
+    cmake_flags_asset_root: Path,
+) -> None:
+    if shutil.which("cmake") is None:
+        pytest.skip("cmake is required for this test")
+    assert cmake_flags_asset_root.exists()
+
+    build_base = tmp_path / "build"
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    config = ProjectConfig(
+        name="cmake_custom_config_test",
+        build_dir=str(build_base),
+        cmake_target="anvil_cmake_flags",
+        cmake_build_type="AnvilCustom",
+        cmake_args=("-DCMAKE_CONFIGURATION_TYPES=Debug;Release;AnvilCustom",),
+        jobs=1,
+    )
+    variant = BuildVariant(
+        name="cmake_custom_variant",
+        compiler=available_compiler,
+        standard="c++20",
+        cxx_flags=("-DFROM_ANVIL_CXXFLAGS=1",),
+        defines=("FROM_ANVIL_DEFINES=1",),
+    )
+
+    metadata = build_cmake(
+        root=cmake_flags_asset_root,
+        config=config,
+        out_dir=out_dir,
+        variant=variant,
+        build_type="AnvilCustom",
+    )
+
+    artifact = resolve_artifact_path(Path(metadata["artifact"]))
+    assert artifact.exists()
+    assert artifact.stat().st_size > 0
+
+    cache_file = Path(metadata["build_dir"]) / "CMakeCache.txt"
+    cache_text = cache_file.read_text(encoding="utf-8")
+    custom_flags = _cache_value(cache_text, "CMAKE_CXX_FLAGS_ANVILCUSTOM")
+    custom_tokens = normalize_flag_tokens(custom_flags)
+
+    assert "CMAKE_CXX_FLAGS_ANVILCUSTOM:STRING=" in cache_text
+    assert "-DFROM_ANVIL_CXXFLAGS=1" in custom_tokens
+    assert "-DFROM_ANVIL_DEFINES=1" in custom_tokens
+    # Custom config should be a blank state controlled by Anvil flags only.
+    assert "-DFROM_CMAKELISTS_RELEASE=1" not in custom_tokens
+    assert "-DNDEBUG" not in custom_tokens
