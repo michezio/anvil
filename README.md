@@ -142,7 +142,7 @@ python -m anvil --target src/ --project path/to/anvil_project.json
 | `build_dir` | string | `/build/anvil/<name>` | CMake build directory (CMake mode) |
 | `out_dir` | string | `.out/anvil_build/<name>` | Output directory for artifacts |
 | `cmake.target` | string | `""` | CMake target name (required for CMake mode) |
-| `cmake.build_type` | string | `""` | Explicit CMake build type. If unset, Anvil still uses a fallback config name (`Release`) for config-specific flag injection and `--config` build selection. |
+| `cmake.build_type` | string | `""` | Single build type used for both CMake configuration (`CMAKE_BUILD_TYPE`) and target build selection (`cmake --build --config`). If unset, Anvil falls back to `Release`. |
 | `cmake.args` | array | `[]` | Extra `cmake` configure arguments |
 | `env_setup` | string | `""` | Script to source before building |
 | `include_dirs` | array | `[]` | Extra `-I` paths (direct mode) |
@@ -160,6 +160,7 @@ In CMake mode, Anvil computes `effective_flags` from each variant (`cxx_flags` +
 - **Standard configs** (`Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`):
   Anvil **appends** injected flags to existing CMake/toolchain defaults.
   This preserves defaults like release-style optimization and `NDEBUG`.
+  For standard configs only, Anvil runs a preliminary CMake configure pass to gather existing config flags before appending.
 
 - **Custom configs** (for example `AnvilCustom`):
   Anvil treats these as a **blank state** and sets config-specific flags from the variant payload, without inheriting standard-config defaults.
