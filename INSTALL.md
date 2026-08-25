@@ -62,7 +62,7 @@ anvil --target myapp.cpp
 
 ```
 anvil/
-├── src/                       # Python package
+├── anvil/                     # Python package
 │   ├── __init__.py            # Package init, exports main()
 │   ├── __main__.py            # Entry point for python -m anvil
 │   └── anvil.py               # Main logic

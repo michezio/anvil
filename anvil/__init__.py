@@ -1,6 +1,6 @@
 """Anvil: build-matrix tool for C/C++ projects with multiple compiler/flag variants."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.1"
 __author__ = "Michele Abruzzese"
 __email__ = "oniricha04@gmail.com"
 __license__ = "MIT"
