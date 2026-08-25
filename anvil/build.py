@@ -99,23 +99,20 @@ def build_cmake(
     if config.cmake_build_type:
         cmake_cmd = f"{cmake_cmd} -DCMAKE_BUILD_TYPE={sh_quote(config.cmake_build_type)}"
 
+    config_name_upper = (config.cmake_build_type or build_type).upper()
+    cmake_config = (
+        f"{cmake_cmd} "
+        f"-DCMAKE_CXX_FLAGS_{config_name_upper}:STRING={sh_quote(effective_flags)} "
+        #f"-DCMAKE_C_FLAGS_{config_name_upper}:STRING={sh_quote(effective_flags)}"
+    )
+    cmake_build = (
+        f"cmake --build {sh_quote(str(build_dir))} --parallel {jobs}"
+        f" --target {sh_quote(config.cmake_target)}"
+    )
+
     if config.env_setup:
-        cmake_config = (
-            f"source {sh_quote(config.env_setup)} && "
-            f"export CXXFLAGS=\"$CXXFLAGS {effective_flags}\" && "
-            f"{cmake_cmd}"
-        )
-        cmake_build = (
-            f"source {sh_quote(config.env_setup)} && "
-            f"cmake --build {sh_quote(str(build_dir))} --parallel {jobs}"
-            f" --target {sh_quote(config.cmake_target)}"
-        )
-    else:
-        cmake_config = f"export CXXFLAGS=\"$CXXFLAGS {effective_flags}\" && {cmake_cmd}"
-        cmake_build = (
-            f"cmake --build {sh_quote(str(build_dir))} --parallel {jobs}"
-            f" --target {sh_quote(config.cmake_target)}"
-        )
+        cmake_config = f"source {sh_quote(config.env_setup)} && {cmake_config}"
+        cmake_build = f"source {sh_quote(config.env_setup)} && {cmake_build}"
 
     run_bash(cmake_config, verbose=config.verbose)
     run_bash(cmake_build, verbose=config.verbose)
