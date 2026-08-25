@@ -7,6 +7,16 @@ from .models import BuildVariant, ProjectConfig
 from .utils import effective_jobs, resolve_compiler_command, run_bash, run_cmd, sh_quote
 
 
+ANSI_CYAN = "\033[1;36m"
+ANSI_RESET = "\033[0m"
+
+
+def _anvil_log(message: str) -> None:
+    print(f"{ANSI_CYAN}========== ANVIL =========={ANSI_RESET}")
+    print(f"{ANSI_CYAN}{message}{ANSI_RESET}")
+    print(f"{ANSI_CYAN}==========================={ANSI_RESET}")
+
+
 def compose_effective_flags(cxx_flags: tuple[str, ...], defines: tuple[str, ...]) -> str:
     flags = " ".join(cxx_flags)
     define_flags = " ".join(f"-D{d}" for d in defines)
@@ -92,8 +102,8 @@ def build_cmake(
     cmake_config_cmd.extend(config.cmake_args)
 
     selected_config = config.cmake_build_type or build_type
-    if config.cmake_build_type:
-        cmake_config_cmd.append(f"-DCMAKE_BUILD_TYPE={config.cmake_build_type}")
+    if selected_config:
+        cmake_config_cmd.append(f"-DCMAKE_BUILD_TYPE={selected_config}")
 
     config_name_upper = selected_config.upper()
 
@@ -116,32 +126,42 @@ def build_cmake(
         else:
             run_cmd(args, verbose=config.verbose)
 
-    _run_configure(cmake_config_cmd)
-
-    cache_file = build_dir / "CMakeCache.txt"
+    is_standard_config = config_name_upper in {"DEBUG", "RELEASE", "RELWITHDEBINFO", "MINSIZEREL"}
     cxx_key = f"CMAKE_CXX_FLAGS_{config_name_upper}"
     c_key = f"CMAKE_C_FLAGS_{config_name_upper}"
 
-    existing_cxx_flags = _read_cmake_cache_value(cache_file, cxx_key)
-    existing_c_flags = _read_cmake_cache_value(cache_file, c_key)
-
-    is_standard_config = config_name_upper in {"DEBUG", "RELEASE", "RELWITHDEBINFO", "MINSIZEREL"}
     if is_standard_config:
+        _anvil_log(f"Standard config '{selected_config}': running preliminary configure to gather CMake defaults")
+        _run_configure(cmake_config_cmd)
+
+        cache_file = build_dir / "CMakeCache.txt"
+        existing_cxx_flags = _read_cmake_cache_value(cache_file, cxx_key)
+        existing_c_flags = _read_cmake_cache_value(cache_file, c_key)
+
         merged_cxx_flags = _merge_flag_strings(existing_cxx_flags, effective_flags)
         merged_c_flags = _merge_flag_strings(existing_c_flags, effective_flags)
+
+        _anvil_log(f"Injecting merged flags into {cxx_key} and {c_key}")
+        second_configure_cmd = [*cmake_config_cmd]
+        second_configure_cmd.append(f"-D{cxx_key}:STRING={merged_cxx_flags}")
+        second_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
+        _run_configure(second_configure_cmd)
     else:
+        _anvil_log(f"Custom config '{selected_config}': injecting blank-state Anvil flags")
         merged_cxx_flags = effective_flags
         merged_c_flags = effective_flags
 
-    second_configure_cmd = [*cmake_config_cmd]
-    second_configure_cmd.append(f"-D{cxx_key}:STRING={merged_cxx_flags}")
-    second_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
-    _run_configure(second_configure_cmd)
+        single_configure_cmd = [*cmake_config_cmd]
+        single_configure_cmd.append(f"-D{cxx_key}:STRING={merged_cxx_flags}")
+        single_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
+        _run_configure(single_configure_cmd)
 
     if config.env_setup:
         cmake_build = " ".join(sh_quote(token) for token in cmake_build_cmd)
+        _anvil_log(f"Building target '{config.cmake_target}' with config '{selected_config}'")
         run_bash(f"source {sh_quote(config.env_setup)} && {cmake_build}", verbose=config.verbose)
     else:
+        _anvil_log(f"Building target '{config.cmake_target}' with config '{selected_config}'")
         run_cmd(cmake_build_cmd, verbose=config.verbose)
 
     out_bin = out_dir / f"{config.cmake_target}__{variant.name}"
@@ -159,6 +179,7 @@ def build_cmake(
         "compiler": variant.compiler,
         "standard": variant.standard,
         "build_type": build_type,
+        "cmake_build_type": selected_config,
         "cxx_flags": list(variant.cxx_flags),
         "defines": list(variant.defines),
         "effective_flags": effective_flags,

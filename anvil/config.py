@@ -62,13 +62,13 @@ def parse_project_config(path: Path) -> ProjectConfig:
 
     cmake_section = data.get("cmake")
     if isinstance(cmake_section, dict):
-        cmake_target = str(cmake_section.get("target", data.get("cmake_target", ""))).strip()
-        cmake_build_type = str(cmake_section.get("build_type", data.get("build_type", ""))).strip()
-        cmake_args_raw = cmake_section.get("args", data.get("cmake_args", []))
+        cmake_target = str(cmake_section.get("target", "")).strip()
+        cmake_build_type = str(cmake_section.get("build_type", "")).strip()
+        cmake_args_raw = cmake_section.get("args", [])
     else:
-        cmake_target = str(data.get("cmake_target", "")).strip()
-        cmake_build_type = str(data.get("build_type", "")).strip()
-        cmake_args_raw = data.get("cmake_args", [])
+        cmake_target = ""
+        cmake_build_type = ""
+        cmake_args_raw = []
 
     if not isinstance(cmake_args_raw, list):
         raise ValueError("'cmake.args' must be a list")
