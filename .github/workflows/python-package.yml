@@ -29,6 +29,22 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install build pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Verify toolchain
+      shell: bash
+      run: |
+        compiler=""
+        for c in g++ clang++ c++; do
+          if command -v "$c" >/dev/null 2>&1; then
+            compiler="$c"
+            break
+          fi
+        done
+        if [ -z "$compiler" ]; then
+          echo "No supported C++ compiler found (g++, clang++, c++)"
+          exit 1
+        fi
+        "$compiler" --version
+        cmake --version
     - name: Build package
       shell: bash
       run: |
@@ -36,8 +52,4 @@ jobs:
     - name: Test with pytest
       shell: bash
       run: |
-        if [ -d tests ]; then
-          pytest
-        else
-          echo "No tests directory yet; skipping pytest."
-        fi
+        pytest -q

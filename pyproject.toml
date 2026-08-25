@@ -31,6 +31,11 @@ Documentation = "https://github.com/michezio/anvil#readme"
 Repository = "https://github.com/michezio/anvil.git"
 Issues = "https://github.com/michezio/anvil/issues"
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4",
+]
+
 [project.scripts]
 anvil = "anvil.cli:main"
 
@@ -39,3 +44,7 @@ packages = ["anvil"]
 
 [tool.setuptools.dynamic]
 version = {attr = "anvil.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
