@@ -88,7 +88,7 @@ def _run_direct_matrix(
                     break
 
     _write_summary(out_dir, summary)
-    return 1 if (had_failure and config.stop_on_error) else 0
+    return 1 if had_failure else 0
 
 
 def _run_cmake_matrix(
@@ -122,7 +122,7 @@ def _run_cmake_matrix(
                 break
 
     _write_summary(out_dir, summary)
-    return 1 if (had_failure and config.stop_on_error) else 0
+    return 1 if had_failure else 0
 
 
 def _write_summary(out_dir: Path, summary: list[dict]) -> None:
