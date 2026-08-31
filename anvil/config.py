@@ -1,8 +1,17 @@
 import json
+import re
 from pathlib import Path
 
 from .defaults import DEFAULT_VARIANTS_DATA
 from .models import BuildVariant, ProjectConfig
+
+
+VARIANT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def _validate_variant_name(name: str, *, kind: str, source: str) -> None:
+    if not VARIANT_NAME.fullmatch(name):
+        raise ValueError(f"Unsafe {kind} name {name!r} in {source}")
 
 
 def discover_configs(
@@ -130,6 +139,7 @@ def _parse_base_entry(item: dict, *, source: str, defaults: BuildVariant) -> Bui
     name = str(item.get("name", "")).strip()
     if not name:
         raise ValueError(f"Base entry in {source} missing non-empty 'name'")
+    _validate_variant_name(name, kind="base", source=source)
 
     compiler = str(item.get("compiler", defaults.compiler)).strip() or defaults.compiler
     standard = str(item.get("standard", defaults.standard)).strip() or defaults.standard
@@ -166,6 +176,7 @@ def _parse_variants_config(data: dict, source: str = "<builtin>") -> list[BuildV
         bases_by_name[base.name] = base
 
     variants: list[BuildVariant] = []
+    variant_names: set[str] = set()
     for i, item in enumerate(variants_raw):
         if not isinstance(item, dict):
             raise ValueError(f"Variant entry {i} in {source} must be an object")
@@ -173,6 +184,10 @@ def _parse_variants_config(data: dict, source: str = "<builtin>") -> list[BuildV
         name = str(item.get("name", "")).strip()
         if not name:
             raise ValueError(f"Variant entry {i} in {source} missing non-empty 'name'")
+        _validate_variant_name(name, kind="variant", source=source)
+        if name in variant_names:
+            raise ValueError(f"Duplicate variant name '{name}' in {source}")
+        variant_names.add(name)
 
         base_name = item.get("base")
         if base_name is not None:

@@ -4,9 +4,81 @@ from pathlib import Path
 
 import pytest
 
+import anvil.cli
 from anvil.cli import main as anvil_main
 from cmake_helpers import cache_value, require_cmake
 from conftest import normalize_flag_tokens, resolve_artifact_path
+
+
+def test_project_directory_is_the_default_target_and_boolean_can_be_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.16)\n")
+    (project_root / "anvil_project.json").write_text(
+        json.dumps({"name": "project", "cmake": {"target": "app"}, "clean": True}),
+        encoding="utf-8",
+    )
+    (project_root / "anvil_variants.json").write_text(
+        json.dumps({"variants": [{"name": "default"}]}), encoding="utf-8"
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(root: Path, config: object, *args: object, **kwargs: object) -> int:
+        captured["root"] = root
+        captured["config"] = config
+        return 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(anvil.cli, "_run_cmake_matrix", fake_run)
+    monkeypatch.setattr(sys, "argv", ["anvil", "--project", str(project_root), "--no-clean"])
+
+    assert anvil_main() == 0
+    assert captured["root"] == project_root
+    assert captured["config"].clean is False
+
+
+def test_explicit_target_takes_precedence_over_project_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_root = tmp_path / "config"
+    source_root = tmp_path / "source"
+    config_root.mkdir()
+    source_root.mkdir()
+    (source_root / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.16)\n")
+    project_config = config_root / "anvil_project.json"
+    project_config.write_text(
+        json.dumps({"name": "project", "cmake": {"target": "app"}}), encoding="utf-8"
+    )
+    variants_config = config_root / "anvil_variants.json"
+    variants_config.write_text(
+        json.dumps({"variants": [{"name": "default"}]}), encoding="utf-8"
+    )
+    captured: dict[str, Path] = {}
+
+    def fake_run(root: Path, *args: object, **kwargs: object) -> int:
+        captured["root"] = root
+        return 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(anvil.cli, "_run_cmake_matrix", fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "anvil",
+            "--project",
+            str(project_config),
+            "--variants",
+            str(variants_config),
+            "--target",
+            str(source_root),
+        ],
+    )
+
+    assert anvil_main() == 0
+    assert captured["root"] == source_root
 
 
 def test_cmake_project_with_json_configuration_files(

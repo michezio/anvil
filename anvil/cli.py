@@ -81,8 +81,8 @@ def main() -> int:
     parser.add_argument(
         "--target",
         type=Path,
-        default=".",
-        help="Path to a .cpp file, folder, or CMake project root. Relative paths are resolved from the current working directory (default: .).",
+        default=None,
+        help="Path to a .cpp file, folder, or CMake project root. Defaults to the project config directory, or the current directory when no project is specified.",
     )
     parser.add_argument(
         "--project",
@@ -99,13 +99,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--clean",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=None,
         help="Clean build dirs before building (overrides config).",
     )
     parser.add_argument(
         "--stop-on-error",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=None,
         help="Stop on first variant failure (overrides config).",
     )
@@ -126,7 +126,7 @@ def main() -> int:
     parser.add_argument(
         "--verbose",
         "-v",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=None,
         help="Print full compilation commands.",
     )
@@ -141,22 +141,27 @@ def main() -> int:
     cwd = Path.cwd().resolve()
     root = repo_root()
 
-    target = resolve_path(args.target, base_dir=cwd)
-    if target is None or not target.exists():
-        print(f"Target not found: {target}", file=sys.stderr)
-        return 2
-
     explicit_proj = None
     if args.project is not None:
         explicit_proj = resolve_config_path(
             args.project,
             base_dir=cwd,
-            fallback_dirs=(cwd, target.parent),
+            fallback_dirs=(cwd,),
             names=("anvil_project.json", "anvil.project.json"),
         )
         if explicit_proj is None:
             print(f"Project config not found: {args.project}", file=sys.stderr)
             return 2
+
+    if args.target is not None:
+        target = resolve_path(args.target, base_dir=cwd)
+    elif explicit_proj is not None:
+        target = explicit_proj.parent
+    else:
+        target = cwd
+    if target is None or not target.exists():
+        print(f"Target not found: {target}", file=sys.stderr)
+        return 2
 
     project_base = target
     if explicit_proj is not None:
@@ -229,7 +234,7 @@ def main() -> int:
         print("No variants defined.", file=sys.stderr)
         return 2
 
-    mode = detect_mode(target) if args.target else "cmake"
+    mode = detect_mode(target)
 
     if config.out_dir:
         out_path = Path(config.out_dir).expanduser()
