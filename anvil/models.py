@@ -13,6 +13,7 @@ class BuildVariant:
     defines: tuple[str, ...] = ()
     c_defines: tuple[str, ...] = ()
     cxx_defines: tuple[str, ...] = ()
+    allow_failure: bool = False
 
 
 @dataclass(frozen=True)

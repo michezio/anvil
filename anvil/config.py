@@ -172,6 +172,7 @@ def _parse_base_entry(item: dict, *, source: str, defaults: BuildVariant) -> Bui
     defines = _parse_string_list(item.get("defines", []), key="defines", owner=f"Base '{name}'")
     c_defines = _parse_string_list(item.get("c_defines", []), key="c_defines", owner=f"Base '{name}'")
     cxx_defines = _parse_string_list(item.get("cxx_defines", []), key="cxx_defines", owner=f"Base '{name}'")
+    allow_failure = bool(item.get("allow_failure", defaults.allow_failure))
 
     return BuildVariant(
         name=name,
@@ -184,6 +185,7 @@ def _parse_base_entry(item: dict, *, source: str, defaults: BuildVariant) -> Bui
         defines=defines,
         c_defines=c_defines,
         cxx_defines=cxx_defines,
+        allow_failure=allow_failure,
     )
 
 
@@ -241,6 +243,7 @@ def _parse_variants_config(data: dict, source: str = "<builtin>") -> list[BuildV
         variant_defines = _parse_string_list(item.get("defines", []), key="defines", owner=f"Variant '{name}'")
         variant_c_defines = _parse_string_list(item.get("c_defines", []), key="c_defines", owner=f"Variant '{name}'")
         variant_cxx_defines = _parse_string_list(item.get("cxx_defines", []), key="cxx_defines", owner=f"Variant '{name}'")
+        allow_failure = bool(item.get("allow_failure", base.allow_failure))
 
         c_flags = base.c_flags + variant_c_flags
         cxx_flags = base.cxx_flags + variant_cxx_flags
@@ -260,6 +263,7 @@ def _parse_variants_config(data: dict, source: str = "<builtin>") -> list[BuildV
                 defines=defines,
             c_defines=c_defines,
             cxx_defines=cxx_defines,
+                allow_failure=allow_failure,
             )
         )
 

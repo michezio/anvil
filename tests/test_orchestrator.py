@@ -242,3 +242,37 @@ def test_cmake_parallel_variants_share_the_job_budget(
 
     assert return_code == 0
     assert submitted_jobs == [4, 4]
+
+
+def test_allowed_failure_does_not_fail_or_stop_matrix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = []
+
+    def fake_build(*args: object, **kwargs: object) -> dict:
+        variant = kwargs["variant"]
+        built.append(variant.name)
+        if variant.name == "experimental":
+            raise RuntimeError("unsupported flag")
+        return {"name": variant.name, "artifact": str(tmp_path / variant.name)}
+
+    monkeypatch.setattr("anvil.orchestrator.build_direct", fake_build)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    return_code = _run_direct_matrix(
+        sources=[],
+        include_dir=tmp_path,
+        out_dir=out_dir,
+        output_name="app",
+        variants=[
+            BuildVariant(name="experimental", allow_failure=True),
+            BuildVariant(name="supported"),
+        ],
+        config=ProjectConfig(stop_on_error=True),
+        extra_args=[],
+    )
+
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert return_code == 0
+    assert built == ["experimental", "supported"]
+    assert manifest["artifacts"][0]["status"] == "allowed_failure"

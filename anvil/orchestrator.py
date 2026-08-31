@@ -81,9 +81,16 @@ def _run_direct_matrix(
                         summary.append(metadata)
                         print(f"  [{variant.compiler}] {variant.name} -> {metadata['artifact']}")
                     except RuntimeError as e:
-                        had_failure = True
-                        print(f"  [{variant.compiler}] {variant.name} FAILED: {e}", file=sys.stderr)
-                        summary.append({"name": variant.name, "error": str(e)})
+                        had_failure = had_failure or not variant.allow_failure
+                        label = "ALLOWED FAILURE" if variant.allow_failure else "FAILED"
+                        print(f"  [{variant.compiler}] {variant.name} {label}: {e}", file=sys.stderr)
+                        summary.append(
+                            {
+                                "name": variant.name,
+                                "error": str(e),
+                                "allowed_failure": variant.allow_failure,
+                            }
+                        )
                     _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
                     if had_failure and config.stop_on_error:
                         executor.shutdown(wait=False, cancel_futures=True)
@@ -110,9 +117,16 @@ def _run_direct_matrix(
                     summary.append(metadata)
                     print(f"    -> {metadata['artifact']}")
                 except RuntimeError as e:
-                    had_failure = True
-                    print(f"    FAILED: {e}", file=sys.stderr)
-                    summary.append({"name": variant.name, "error": str(e)})
+                    had_failure = had_failure or not variant.allow_failure
+                    label = "ALLOWED FAILURE" if variant.allow_failure else "FAILED"
+                    print(f"    {label}: {e}", file=sys.stderr)
+                    summary.append(
+                        {
+                            "name": variant.name,
+                            "error": str(e),
+                            "allowed_failure": variant.allow_failure,
+                        }
+                    )
                 _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
                 if had_failure and config.stop_on_error:
                     break
@@ -179,12 +193,19 @@ def _run_cmake_matrix(
                         summary.append(metadata)
                         print(f"  [{variant.compiler}] {variant.name} -> {metadata['artifact']}")
                     except (RuntimeError, FileNotFoundError) as error:
-                        had_failure = True
+                        had_failure = had_failure or not variant.allow_failure
+                        label = "ALLOWED FAILURE" if variant.allow_failure else "FAILED"
                         print(
-                            f"  [{variant.compiler}] {variant.name} FAILED: {error}",
+                            f"  [{variant.compiler}] {variant.name} {label}: {error}",
                             file=sys.stderr,
                         )
-                        summary.append({"name": variant.name, "error": str(error)})
+                        summary.append(
+                            {
+                                "name": variant.name,
+                                "error": str(error),
+                                "allowed_failure": variant.allow_failure,
+                            }
+                        )
                     _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
                     if had_failure and config.stop_on_error:
                         executor.shutdown(wait=False, cancel_futures=True)
@@ -209,9 +230,16 @@ def _run_cmake_matrix(
                     summary.append(metadata)
                     print(f"    -> {metadata['artifact']}")
                 except (RuntimeError, FileNotFoundError) as error:
-                    had_failure = True
-                    print(f"    FAILED: {error}", file=sys.stderr)
-                    summary.append({"name": variant.name, "error": str(error)})
+                    had_failure = had_failure or not variant.allow_failure
+                    label = "ALLOWED FAILURE" if variant.allow_failure else "FAILED"
+                    print(f"    {label}: {error}", file=sys.stderr)
+                    summary.append(
+                        {
+                            "name": variant.name,
+                            "error": str(error),
+                            "allowed_failure": variant.allow_failure,
+                        }
+                    )
                 _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
                 if had_failure and config.stop_on_error:
                     break
@@ -352,7 +380,11 @@ def _persist_run_state(
 
     artifacts = []
     for result in summary:
-        entry = {"variant": result["name"], "status": "failed" if "error" in result else "succeeded"}
+        if result.get("allowed_failure") and "error" in result:
+            status = "allowed_failure"
+        else:
+            status = "failed" if "error" in result else "succeeded"
+        entry = {"variant": result["name"], "status": status}
         artifact_value = result.get("artifact")
         if artifact_value:
             artifact = Path(artifact_value)
@@ -392,7 +424,10 @@ def _write_summary(
     summary_path = out_dir / "build_summary.json"
 
     succeeded = sum(1 for s in summary if "error" not in s)
-    failed = len(summary) - succeeded
-    print(f"\nDone: {succeeded} succeeded, {failed} failed.")
+    allowed_failures = sum(1 for s in summary if s.get("allowed_failure") and "error" in s)
+    failed = len(summary) - succeeded - allowed_failures
+    print(
+        f"\nDone: {succeeded} succeeded, {allowed_failures} allowed failures, {failed} failed."
+    )
     print(f"Artifacts: {out_dir}")
     print(f"Summary:   {summary_path}")
