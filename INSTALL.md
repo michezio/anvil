@@ -65,7 +65,10 @@ anvil/
 ├── anvil/                     # Python package
 │   ├── __init__.py            # Package init, exports main()
 │   ├── __main__.py            # Entry point for python -m anvil
-│   └── anvil.py               # Main logic
+│   ├── build.py               # Direct and CMake build implementations
+│   ├── cli.py                 # Command-line interface and path resolution
+│   ├── config.py              # JSON parsing and validation
+│   └── orchestrator.py        # Matrix scheduling and run state
 ├── examples/                  # Example configurations
 │   ├── anvil_project.json
 │   ├── anvil_variants_quick.json

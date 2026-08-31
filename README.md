@@ -14,8 +14,9 @@ Perfect for:
 - **Multi-compiler support**: GCC, Clang, Zig, etc. (any compiler with a compatible CLI)
 - **Per-variant configuration**: Each variant specifies compiler, C++ standard, optimization flags, and defines
 - **Parallel builds**: Build multiple variants simultaneously for faster turnaround
+- **Focused workflows**: Select variants by exact name or glob, inspect plans, and resume matching builds
 - **Config discovery**: Looks for project config files named `anvil_project.json` or `anvil.project.json`, and variant files named `anvil_variants.json` or `anvil.variants.json` near the target or project directory
-- **Flexible output**: Artifacts and metadata collected in a single directory
+- **Reproducible output**: Atomic summaries, hashed manifests, compilation databases, and tool metadata
 - **Cross-platform CMake execution**: Works with single-config and multi-config generators (Linux/macOS/Windows)
 
 ## Installation
@@ -58,7 +59,8 @@ Produces five binaries (O0, O1, O2, O3, Ofast):
   ├── myapp__gcc_O2
   ├── myapp__gcc_O3
   ├── myapp__gcc_Ofast
-  └── build_summary.json
+  ├── build_summary.json
+  └── manifest.json
 ```
 
 ### 2. Compile all files in a folder
@@ -113,8 +115,11 @@ Create `anvil_project.json` next to your source. The sample project config in th
   "build_dir": "/build/anvil/myproject",
   "out_dir": ".out/anvil_build/myproject",
   "cmake": {
+    "source_dir": ".",
     "target": "my_target",
     "build_type": "Release",
+    "toolchain_file": "toolchains/sdk.cmake",
+    "artifact": "bin/my_target",
     "args": []
   },
   "include_dirs": ["/opt/deps/include"],
@@ -141,21 +146,25 @@ python -m anvil --target src/ --project path/to/anvil_project.json
 | `name` | string | (inferred from parent directory) | Project name, used in output paths |
 | `build_dir` | string | `/build/anvil/<name>` | CMake build directory (CMake mode) |
 | `out_dir` | string | `.out/anvil_build/<name>` | Output directory for artifacts |
+| `cmake.source_dir` | string | project config directory | CMake source root, resolved relative to the project config |
 | `cmake.target` | string | `""` | CMake target name (required for CMake mode) |
 | `cmake.build_type` | string | `""` | Single build type used for both CMake configuration (`CMAKE_BUILD_TYPE`) and target build selection (`cmake --build --config`). If unset, Anvil falls back to `Release`. |
+| `cmake.toolchain_file` | string | `""` | Toolchain file resolved relative to the project config |
+| `cmake.artifact` | string | `""` | Optional artifact path relative to the variant build directory |
 | `cmake.args` | array | `[]` | Extra `cmake` configure arguments |
 | `env_setup` | string | `""` | Script to source before building |
 | `include_dirs` | array | `[]` | Extra `-I` paths (direct mode) |
 | `link_flags` | string | `""` | Extra linker flags |
 | `jobs` | int | `0` | Compile jobs per variant (`0` = auto via Python CPU count) |
-| `parallel_variants` | int | `1` | Number of variants to build simultaneously |
+| `parallel_variants` | int | `1` | Number of direct or CMake variants to build simultaneously; the job budget is divided among CMake workers |
 | `stop_on_error` | bool | `false` | Abort on first variant failure |
+| `resume` | bool | `false` | Reuse successful builds with matching fingerprints and artifact hashes |
 | `clean` | bool | `false` | Clean build directories before building |
 | `verbose` | bool | `false` | Print full compiler commands |
 
 ### CMake Flag Behavior (Config-Aware)
 
-In CMake mode, Anvil computes `effective_flags` from each variant (`cxx_flags` + `defines`) and applies them to `CMAKE_CXX_FLAGS_<CONFIG>` and `CMAKE_C_FLAGS_<CONFIG>`.
+In CMake mode, Anvil computes separate language payloads. Shared `defines` apply to both languages; `c_flags`/`c_defines` and `cxx_flags`/`cxx_defines` apply only to their language. `standard` configures CMake's required C++ standard.
 
 - **Standard configs** (`Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`):
   Anvil **appends** injected flags to existing CMake/toolchain defaults.
@@ -208,9 +217,15 @@ Base fields:
 |-------|------|---------|-------------|
 | `name` | string | (required) | Base identifier |
 | `compiler` | string | `g++` | Compiler command (supports multi-word forms like `zig c++`) |
+| `c_compiler` | string | environment/default C compiler | C compiler command |
+| `cxx_compiler` | string | `compiler` | Explicit C++ compiler command |
 | `standard` | string | `c++23` | C++ standard flag (for example `c++20` or `c++23`) |
+| `c_flags` | array | `[]` | C-only compiler flags |
 | `cxx_flags` | array | `[]` | Base compiler flags |
-| `defines` | array | `[]` | Base preprocessor defines |
+| `defines` | array | `[]` | Shared preprocessor defines |
+| `c_defines` | array | `[]` | C-only preprocessor defines |
+| `cxx_defines` | array | `[]` | C++-only preprocessor defines |
+| `allow_failure` | bool | `false` | Report a failed experimental variant without failing the matrix |
 
 Variant fields:
 
@@ -219,16 +234,24 @@ Variant fields:
 | `name` | string | (required) | Variant identifier |
 | `base` | string | unset | Optional base name to inherit from |
 | `compiler` | string | inherited / `g++` | Compiler command |
+| `c_compiler` | string | inherited | C compiler command |
+| `cxx_compiler` | string | inherited / `compiler` | Explicit C++ compiler command |
 | `standard` | string | inherited / `c++23` | C++ standard flag |
+| `c_flags` | array | `[]` | C-only flags appended to base flags |
 | `cxx_flags` | array | `[]` | Variant flags appended to base flags |
-| `defines` | array | `[]` | Variant defines appended to base defines |
+| `defines` | array | `[]` | Shared defines appended to base defines |
+| `c_defines` | array | `[]` | C-only defines appended to base defines |
+| `cxx_defines` | array | `[]` | C++-only defines appended to base defines |
+| `allow_failure` | bool | inherited / `false` | Allow this variant to fail without failing the matrix |
 
 ## Command Line
 
 ```
 usage: anvil [-h] [--target TARGET] [--project PROJECT] [--variants VARIANTS]
-             [--clean] [--stop-on-error] [--jobs JOBS] [--parallel PARALLEL]
-             [--verbose] [--extra-args [EXTRA_ARGS ...]]
+             [--variant VARIANT] [--match MATCH] [--list-variants] [--dry-run]
+             [--clean | --no-clean] [--stop-on-error | --no-stop-on-error]
+             [--resume | --no-resume] [--jobs JOBS] [--parallel PARALLEL]
+             [--verbose | --no-verbose] [--extra-args [EXTRA_ARGS ...]]
 
 Build-matrix tool: compiles C/C++ targets with multiple variant configurations.
 
@@ -236,8 +259,13 @@ options:
   --target TARGET              Path to a .cpp file, folder, or CMake project root
   --project PROJECT            Path to an anvil_project.json or anvil.project.json file/folder
   --variants VARIANTS          Path to an anvil_variants.json or anvil.variants.json file/folder
-  --clean                      Clean build directories before building
-  --stop-on-error              Stop on first variant failure
+  --variant VARIANT            Select an exact variant; repeatable
+  --match MATCH                Select variants with a shell-style glob; repeatable
+  --list-variants              List expanded, filtered variants without building
+  --dry-run                    Print the resolved build plan without building
+  --clean, --no-clean          Override build-directory cleaning
+  --stop-on-error, --no-stop-on-error
+  --resume, --no-resume        Reuse fingerprint-compatible successful builds
   --jobs JOBS, -j JOBS         Compile jobs per variant (0 = nproc)
   --parallel PARALLEL, -p      Variants to build in parallel
   --verbose, -v                Print full compilation commands
@@ -287,7 +315,9 @@ Artifacts are collected under `out_dir` (default: `.out/anvil_build/<name>`):
   ├── myproject__gcc_O2.json
   ├── myproject__gcc_O3.json
   ├── myproject__gcc_Ofast.json
-  └── build_summary.json            # Build stats
+  ├── myproject__gcc_O3.compile_commands.json
+  ├── build_summary.json            # Incrementally written variant results
+  └── manifest.json                 # Authoritative current artifacts and SHA-256 hashes
 ```
 
 Each `.json` file contains:
@@ -296,6 +326,10 @@ Each `.json` file contains:
 - Effective flags and defines
 - Build directory
 - Artifact path
+
+Consumers should enumerate `manifest.json`, not files by glob. A new invocation removes
+stale files for the active target, and interruption leaves `complete: false` with all
+results persisted up to that point.
 
 ## Testing & CI
 
