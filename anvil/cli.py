@@ -56,12 +56,13 @@ Usage examples:
 """
 
 import argparse
+import fnmatch
 import sys
 from dataclasses import replace
 from pathlib import Path
 
 from .config import default_variants, parse_project_config, parse_variants
-from .models import ProjectConfig
+from .models import BuildVariant, ProjectConfig
 from .orchestrator import _run_cmake_matrix, _run_direct_matrix, detect_mode
 from .utils import (
     find_sources,
@@ -69,6 +70,27 @@ from .utils import (
     resolve_config_path,
     resolve_path,
 )
+
+
+def _select_variants(
+    variants: list[BuildVariant], exact_names: list[str], patterns: list[str]
+) -> list[BuildVariant]:
+    available = {variant.name for variant in variants}
+    unknown = [name for name in exact_names if name not in available]
+    if unknown:
+        raise ValueError(f"Unknown variant name(s): {', '.join(unknown)}")
+    if not exact_names and not patterns:
+        return variants
+
+    selected = [
+        variant
+        for variant in variants
+        if variant.name in exact_names
+        or any(fnmatch.fnmatchcase(variant.name, pattern) for pattern in patterns)
+    ]
+    if not selected:
+        raise ValueError("Variant selectors matched no variants")
+    return selected
 
 
 def main() -> int:
@@ -96,6 +118,28 @@ def main() -> int:
         "--variants",
         type=Path,
         help="Path to an anvil_variants.json file or a folder that contains it. Relative paths are resolved from the current working directory.",
+    )
+    parser.add_argument(
+        "--variant",
+        action="append",
+        default=[],
+        help="Build an exact variant name. Repeat to select multiple variants.",
+    )
+    parser.add_argument(
+        "--match",
+        action="append",
+        default=[],
+        help="Build variants matching a shell-style glob. Repeat to add patterns.",
+    )
+    parser.add_argument(
+        "--list-variants",
+        action="store_true",
+        help="List expanded variants after filtering and exit.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the resolved build plan without building.",
     )
     parser.add_argument(
         "--clean",
@@ -239,6 +283,16 @@ def main() -> int:
     if not variants:
         print("No variants defined.", file=sys.stderr)
         return 2
+    try:
+        variants = _select_variants(variants, args.variant, args.match)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+    if args.list_variants:
+        for variant in variants:
+            print(variant.name)
+        return 0
 
     mode = detect_mode(target)
 
@@ -248,6 +302,14 @@ def main() -> int:
     else:
         out_dir = root / ".out" / "anvil_build" / config.name
     out_dir = out_dir.resolve(strict=False)
+
+    if args.dry_run:
+        print(f"Mode:       {mode}")
+        print(f"Target:     {target}")
+        print(f"Output:     {out_dir}")
+        print(f"Variants:   {', '.join(variant.name for variant in variants)}")
+        return 0
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if mode == "cmake":
