@@ -202,10 +202,16 @@ def main() -> int:
         var_json = explicit_vars
 
     if proj_json:
-        print(f"Config:   {proj_json}")
+        print(f"Project config: {proj_json}")
         config = parse_project_config(proj_json)
     else:
         config = ProjectConfig()
+
+    if args.target is None and config.cmake_source_dir:
+        target = Path(config.cmake_source_dir)
+    if not target.exists():
+        print(f"Target not found: {target}", file=sys.stderr)
+        return 2
 
     overrides: dict = {}
     if args.clean is not None:
@@ -249,6 +255,8 @@ def main() -> int:
             print("CMake mode requires a cmake.target entry in the project config.", file=sys.stderr)
             return 2
         cmake_root = target.resolve(strict=False)
+        print(f"Source root:    {cmake_root}")
+        print(f"CMake target:   {config.cmake_target}")
         return _run_cmake_matrix(cmake_root, config, out_dir, variants, config.cmake_build_type or "Release")
 
     if mode == "file":

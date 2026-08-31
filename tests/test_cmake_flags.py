@@ -18,12 +18,17 @@ def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
     build_base = tmp_path / "build"
     out_dir = tmp_path / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
+    toolchain_file = tmp_path / "toolchain.cmake"
+    toolchain_file.write_text(
+        'set(ANVIL_TOOLCHAIN_MARKER "loaded" CACHE STRING "")\n', encoding="utf-8"
+    )
 
     config = ProjectConfig(
         name="cmake_flags_test",
         build_dir=str(build_base),
         cmake_target="anvil_cmake_flags",
         cmake_build_type="Release",
+        cmake_toolchain_file=str(toolchain_file),
         jobs=1,
     )
     variant = BuildVariant(
@@ -79,6 +84,14 @@ def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
     assert cache_value(cache_text, "CMAKE_CXX_STANDARD") == "20"
     assert cache_value(cache_text, "CMAKE_CXX_STANDARD_REQUIRED") == "ON"
     assert cache_value(cache_text, "CMAKE_CXX_EXTENSIONS") == "OFF"
+    assert cache_value(cache_text, "ANVIL_TOOLCHAIN_MARKER") == "loaded"
+    assert saved["resolved_cxx_compiler"]
+    assert saved["compiler_version"]
+    assert saved["cmake_version"].startswith("cmake version")
+    assert len(saved["artifact_sha256"]) == 64
+    assert saved["toolchain_file"] == str(toolchain_file)
+    assert len(saved["toolchain_sha256"]) == 64
+    assert Path(saved["compile_commands"]).exists()
 
     if "CMAKE_BUILD_TYPE:STRING=" in cache_text:
         assert "CMAKE_BUILD_TYPE:STRING=Release" in cache_text

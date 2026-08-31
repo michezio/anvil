@@ -71,13 +71,30 @@ def parse_project_config(path: Path) -> ProjectConfig:
 
     cmake_section = data.get("cmake")
     if isinstance(cmake_section, dict):
+        cmake_source_dir_raw = str(cmake_section.get("source_dir", "")).strip()
         cmake_target = str(cmake_section.get("target", "")).strip()
         cmake_build_type = str(cmake_section.get("build_type", "")).strip()
+        cmake_toolchain_raw = str(cmake_section.get("toolchain_file", "")).strip()
+        cmake_artifact = str(cmake_section.get("artifact", "")).strip()
         cmake_args_raw = cmake_section.get("args", [])
     else:
+        cmake_source_dir_raw = ""
         cmake_target = ""
         cmake_build_type = ""
+        cmake_toolchain_raw = ""
+        cmake_artifact = ""
         cmake_args_raw = []
+
+    def resolve_config_relative(value: str) -> str:
+        if not value:
+            return ""
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = path.parent / candidate
+        return str(candidate.resolve(strict=False))
+
+    cmake_source_dir = resolve_config_relative(cmake_source_dir_raw)
+    cmake_toolchain_file = resolve_config_relative(cmake_toolchain_raw)
 
     if not isinstance(cmake_args_raw, list):
         raise ValueError("'cmake.args' must be a list")
@@ -101,8 +118,11 @@ def parse_project_config(path: Path) -> ProjectConfig:
         name=name,
         build_dir=build_dir,
         out_dir=out_dir,
+        cmake_source_dir=cmake_source_dir,
         cmake_target=cmake_target,
         cmake_build_type=cmake_build_type,
+        cmake_toolchain_file=cmake_toolchain_file,
+        cmake_artifact=cmake_artifact,
         cmake_args=cmake_args,
         env_setup=env_setup,
         include_dirs=include_dirs,

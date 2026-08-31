@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -103,4 +104,4 @@ def find_sources(target_dir: Path) -> list[Path]:
 
 def resolve_compiler_command(compiler: str) -> list[str]:
     """Convert a compiler string to a command list (handles 'zig c++' etc.)."""
-    return compiler.split()
+    return shlex.split(compiler)

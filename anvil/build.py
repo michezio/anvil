@@ -1,7 +1,10 @@
+import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import subprocess
 from pathlib import Path
 
 from .models import BuildVariant, ProjectConfig
@@ -70,7 +73,7 @@ def build_direct(
     cmd.extend(["-o", str(out_bin)])
 
     if config.link_flags:
-        cmd.extend(config.link_flags.split())
+        cmd.extend(shlex.split(config.link_flags))
 
     if extra_args:
         cmd.extend(extra_args)
@@ -105,6 +108,9 @@ def build_cmake(
     if config.clean and build_dir.exists():
         shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
+    file_api_query = build_dir / ".cmake" / "api" / "v1" / "query" / "codemodel-v2"
+    file_api_query.parent.mkdir(parents=True, exist_ok=True)
+    file_api_query.touch()
 
     effective_c_flags = compose_effective_flags(variant.c_flags, variant.defines + variant.c_defines)
     effective_cxx_flags = compose_effective_flags(
@@ -121,6 +127,9 @@ def build_cmake(
         cmake_config_cmd.append(f"-DCMAKE_C_COMPILER={variant.c_compiler}")
     if variant.standard:
         cmake_config_cmd.extend(_cmake_standard_arguments(variant.standard))
+    if config.cmake_toolchain_file:
+        cmake_config_cmd.append(f"-DCMAKE_TOOLCHAIN_FILE={config.cmake_toolchain_file}")
+    cmake_config_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
 
     cmake_config_cmd.extend(config.cmake_args)
 
@@ -190,7 +199,12 @@ def build_cmake(
         run_cmd(cmake_build_cmd, verbose=config.verbose)
 
     out_bin = out_dir / f"{config.cmake_target}__{variant.name}"
-    built_bin = _find_cmake_artifact(build_dir, config.cmake_target)
+    built_bin = _find_cmake_artifact(
+        build_dir,
+        config.cmake_target,
+        selected_config=selected_config,
+        explicit_artifact=config.cmake_artifact,
+    )
     if built_bin:
         shutil.copy2(built_bin, out_bin)
     else:
@@ -198,6 +212,13 @@ def build_cmake(
             f"Could not locate artifact for target '{config.cmake_target}' in {build_dir}"
         )
 
+    compile_commands = build_dir / "compile_commands.json"
+    copied_compile_commands = out_dir / f"{config.cmake_target}__{variant.name}.compile_commands.json"
+    if compile_commands.exists():
+        shutil.copy2(compile_commands, copied_compile_commands)
+
+    cache_file = build_dir / "CMakeCache.txt"
+    resolved_cxx_compiler = _read_cmake_cache_value(cache_file, "CMAKE_CXX_COMPILER")
     metadata = {
         "project": config.name,
         "name": variant.name,
@@ -216,6 +237,24 @@ def build_cmake(
         "effective_cxx_flags": effective_cxx_flags,
         "effective_flags": effective_cxx_flags,
         "build_dir": str(build_dir),
+        "source_root": str(root.resolve(strict=False)),
+        "cmake_target": config.cmake_target,
+        "cmake_generator": _read_cmake_cache_value(cache_file, "CMAKE_GENERATOR"),
+        "cmake_version": _command_version(["cmake", "--version"]),
+        "requested_compiler": cxx_compiler,
+        "resolved_cxx_compiler": resolved_cxx_compiler,
+        "compiler_version": _command_version([resolved_cxx_compiler, "--version"]),
+        "toolchain_file": config.cmake_toolchain_file or None,
+        "toolchain_sha256": _file_sha256(Path(config.cmake_toolchain_file))
+        if config.cmake_toolchain_file
+        else None,
+        "environment_setup": config.env_setup or None,
+        "environment_setup_sha256": _file_sha256(Path(config.env_setup)) if config.env_setup else None,
+        "environment": _selected_environment(config.env_setup),
+        "artifact_sha256": _file_sha256(out_bin),
+        "compile_commands": str(copied_compile_commands) if copied_compile_commands.exists() else None,
+        "configure_command": cmake_config_cmd,
+        "build_command": cmake_build_cmd,
         "artifact": str(out_bin),
     }
 
@@ -225,8 +264,39 @@ def build_cmake(
     return metadata
 
 
-def _find_cmake_artifact(build_dir: Path, target_name: str) -> Path | None:
-    """Heuristic: find the built binary by target name in the build tree."""
+def _find_cmake_artifact(
+    build_dir: Path,
+    target_name: str,
+    *,
+    selected_config: str = "",
+    explicit_artifact: str = "",
+) -> Path | None:
+    if explicit_artifact:
+        candidate = Path(explicit_artifact)
+        if not candidate.is_absolute():
+            candidate = build_dir / candidate
+        return candidate if candidate.is_file() else None
+
+    reply_dir = build_dir / ".cmake" / "api" / "v1" / "reply"
+    indexes = sorted(reply_dir.glob("index-*.json"), reverse=True)
+    if indexes:
+        index = json.loads(indexes[0].read_text(encoding="utf-8"))
+        codemodel_ref = index.get("reply", {}).get("codemodel-v2")
+        if isinstance(codemodel_ref, dict):
+            codemodel = json.loads((reply_dir / codemodel_ref["jsonFile"]).read_text(encoding="utf-8"))
+            configurations = codemodel.get("configurations", [])
+            preferred = [c for c in configurations if c.get("name") == selected_config]
+            for configuration in preferred or configurations:
+                for target_ref in configuration.get("targets", []):
+                    if target_ref.get("name") != target_name:
+                        continue
+                    target = json.loads((reply_dir / target_ref["jsonFile"]).read_text(encoding="utf-8"))
+                    for artifact in target.get("artifacts", []):
+                        candidate = build_dir / artifact["path"]
+                        if candidate.is_file():
+                            return candidate
+
+    # Older CMake versions or unsupported generators may not provide a codemodel reply.
     for candidate in build_dir.rglob(target_name):
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
@@ -235,6 +305,38 @@ def _find_cmake_artifact(build_dir: Path, target_name: str) -> Path | None:
             if candidate.is_file():
                 return candidate
     return None
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _command_version(command: list[str]) -> str:
+    if not command[0]:
+        return ""
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+    except OSError:
+        return ""
+    output = result.stdout.strip() or result.stderr.strip()
+    return output.splitlines()[0] if output else ""
+
+
+def _selected_environment(env_setup: str) -> dict[str, str]:
+    names = ("CC", "CXX", "SYSROOT", "SDKTARGETSYSROOT", "TARGET_PREFIX")
+    if not env_setup:
+        return {name: os.environ[name] for name in names if name in os.environ}
+    command = f"source {sh_quote(env_setup)} && env -0"
+    result = subprocess.run(["bash", "-lc", command], capture_output=True, check=False)
+    if result.returncode != 0:
+        return {}
+    environment = {}
+    for item in result.stdout.split(b"\0"):
+        key, separator, value = item.partition(b"=")
+        name = key.decode(errors="replace")
+        if separator and name in names:
+            environment[name] = value.decode(errors="replace")
+    return environment
 
 
 def _read_cmake_cache_value(cache_file: Path, key: str) -> str:

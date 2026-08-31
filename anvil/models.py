@@ -20,8 +20,11 @@ class ProjectConfig:
     name: str = ""
     build_dir: str = "/build/anvil"
     out_dir: str = ""
+    cmake_source_dir: str = ""
     cmake_target: str = ""
     cmake_build_type: str = ""
+    cmake_toolchain_file: str = ""
+    cmake_artifact: str = ""
     cmake_args: tuple[str, ...] = ()
     env_setup: str = ""
     include_dirs: tuple[str, ...] = ()

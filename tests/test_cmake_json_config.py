@@ -81,6 +81,30 @@ def test_explicit_target_takes_precedence_over_project_directory(
     assert captured["root"] == source_root
 
 
+def test_cmake_paths_are_resolved_relative_to_project_config(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    project_config = config_root / "anvil_project.json"
+    project_config.write_text(
+        json.dumps(
+            {
+                "cmake": {
+                    "source_dir": "../source",
+                    "target": "app",
+                    "toolchain_file": "toolchains/sdk.cmake",
+                    "artifact": "bin/app",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = anvil.config.parse_project_config(project_config)
+    assert config.cmake_source_dir == str((tmp_path / "source").resolve())
+    assert config.cmake_toolchain_file == str((config_root / "toolchains/sdk.cmake").resolve())
+    assert config.cmake_artifact == "bin/app"
+
+
 def test_cmake_project_with_json_configuration_files(
     tmp_path: Path,
     available_compiler: str,
