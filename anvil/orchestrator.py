@@ -1,7 +1,11 @@
 import json
 import hashlib
+import shlex
+import shutil
+import subprocess
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import asdict
 from pathlib import Path
 from uuid import uuid4
 
@@ -38,13 +42,24 @@ def _run_direct_matrix(
     summary: list[dict] = []
     had_failure = False
     run_id = uuid4().hex
-    _remove_previous_outputs(out_dir, output_name)
+    fingerprints = {
+        variant.name: _build_fingerprint(
+            "direct", variant, config, sources=sources, extra_args=extra_args
+        )
+        for variant in variants
+    }
+    resumed = _load_resumable_results(out_dir, output_name, fingerprints) if config.resume else {}
+    _remove_previous_outputs(out_dir, output_name, keep_variants=set(resumed))
 
     try:
         if config.parallel_variants > 1:
             with ProcessPoolExecutor(max_workers=config.parallel_variants) as executor:
                 futures = {}
                 for variant in variants:
+                    if variant.name in resumed:
+                        summary.append(resumed[variant.name])
+                        _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
+                        continue
                     fut = executor.submit(
                         build_direct,
                         sources,
@@ -54,6 +69,7 @@ def _run_direct_matrix(
                         variant,
                         config,
                         extra_args or None,
+                        fingerprints[variant.name],
                     )
                     futures[fut] = variant
 
@@ -74,6 +90,11 @@ def _run_direct_matrix(
         else:
             for variant in variants:
                 print(f"\n=== [{variant.compiler} -std={variant.standard}] {variant.name} ===")
+                if variant.name in resumed:
+                    summary.append(resumed[variant.name])
+                    print(f"    -> {resumed[variant.name]['artifact']} (resumed)")
+                    _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
+                    continue
                 try:
                     metadata = build_direct(
                         sources=sources,
@@ -83,6 +104,7 @@ def _run_direct_matrix(
                         variant=variant,
                         config=config,
                         extra_args=extra_args or None,
+                        fingerprint=fingerprints[variant.name],
                     )
                     summary.append(metadata)
                     print(f"    -> {metadata['artifact']}")
@@ -112,11 +134,27 @@ def _run_cmake_matrix(
     summary: list[dict] = []
     had_failure = False
     run_id = uuid4().hex
-    _remove_previous_outputs(out_dir, config.cmake_target)
+    fingerprints = {
+        variant.name: _build_fingerprint(
+            "cmake", variant, config, root=root, build_type=build_type
+        )
+        for variant in variants
+    }
+    resumed = (
+        _load_resumable_results(out_dir, config.cmake_target, fingerprints)
+        if config.resume
+        else {}
+    )
+    _remove_previous_outputs(out_dir, config.cmake_target, keep_variants=set(resumed))
 
     try:
         for variant in variants:
             print(f"\n=== [{variant.compiler}] {variant.name} ===")
+            if variant.name in resumed:
+                summary.append(resumed[variant.name])
+                print(f"    -> {resumed[variant.name]['artifact']} (resumed)")
+                _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
+                continue
             try:
                 metadata = build_cmake(
                     root=root,
@@ -124,6 +162,7 @@ def _run_cmake_matrix(
                     out_dir=out_dir,
                     variant=variant,
                     build_type=build_type,
+                    fingerprint=fingerprints[variant.name],
                 )
                 summary.append(metadata)
                 print(f"    -> {metadata['artifact']}")
@@ -142,10 +181,115 @@ def _run_cmake_matrix(
     return 1 if had_failure else 0
 
 
-def _remove_previous_outputs(out_dir: Path, output_name: str) -> None:
+def _remove_previous_outputs(
+    out_dir: Path, output_name: str, *, keep_variants: set[str] | None = None
+) -> None:
+    preserved = set()
+    for variant_name in keep_variants or set():
+        prefix = f"{output_name}__{variant_name}"
+        preserved.update({prefix, f"{prefix}.json", f"{prefix}.compile_commands.json"})
     for path in out_dir.glob(f"{output_name}__*"):
-        if path.is_file() or path.is_symlink():
+        if path.name not in preserved and (path.is_file() or path.is_symlink()):
             path.unlink()
+
+
+def _load_resumable_results(
+    out_dir: Path, output_name: str, fingerprints: dict[str, str]
+) -> dict[str, dict]:
+    resumed = {}
+    for variant_name, fingerprint in fingerprints.items():
+        metadata_path = out_dir / f"{output_name}__{variant_name}.json"
+        if not metadata_path.is_file():
+            continue
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            artifact = Path(metadata["artifact"])
+            artifact_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        except (OSError, KeyError, TypeError, json.JSONDecodeError):
+            continue
+        if metadata.get("fingerprint") != fingerprint:
+            continue
+        if metadata.get("artifact_sha256") != artifact_hash:
+            continue
+        resumed[variant_name] = {**metadata, "resumed": True}
+    return resumed
+
+
+def _build_fingerprint(
+    mode: str,
+    variant: BuildVariant,
+    config: ProjectConfig,
+    *,
+    sources: list[Path] | None = None,
+    root: Path | None = None,
+    extra_args: list[str] | None = None,
+    build_type: str = "",
+) -> str:
+    config_data = asdict(config)
+    for operational_key in (
+        "clean",
+        "out_dir",
+        "parallel_variants",
+        "resume",
+        "stop_on_error",
+        "verbose",
+    ):
+        config_data.pop(operational_key, None)
+
+    source_paths = sources or _cmake_input_files(root)
+    compiler_command = shlex.split(variant.cxx_compiler or variant.compiler)[0]
+    payload = {
+        "mode": mode,
+        "variant": asdict(variant),
+        "config": config_data,
+        "build_type": build_type,
+        "extra_args": extra_args or [],
+        "compiler": _compiler_identity(compiler_command),
+        "environment_setup_sha256": _optional_file_hash(config.env_setup),
+        "toolchain_sha256": _optional_file_hash(config.cmake_toolchain_file),
+        "sources": [
+            {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            for path in source_paths
+            if path.is_file()
+        ],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _compiler_identity(command: str) -> dict[str, str]:
+    resolved = shutil.which(command) or command
+    try:
+        result = subprocess.run(
+            [resolved, "--version"], capture_output=True, text=True, check=False
+        )
+        output = result.stdout.strip() or result.stderr.strip()
+        version = output.splitlines()[0] if output else ""
+    except OSError:
+        version = ""
+    return {"path": resolved, "version": version}
+
+
+def _optional_file_hash(path_value: str) -> str:
+    if not path_value:
+        return ""
+    try:
+        return hashlib.sha256(Path(path_value).read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _cmake_input_files(root: Path | None) -> list[Path]:
+    if root is None:
+        return []
+    extensions = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".cmake"}
+    ignored_parts = {".git", ".out", "__pycache__"}
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and not ignored_parts.intersection(path.parts)
+        and (path.suffix.lower() in extensions or path.name == "CMakeLists.txt")
+    )
 
 
 def _atomic_write_json(path: Path, data: object) -> None:

@@ -111,6 +111,7 @@ def parse_project_config(path: Path) -> ProjectConfig:
     jobs = int(data.get("jobs", 0))
     parallel_variants = max(1, int(data.get("parallel_variants", 1)))
     stop_on_error = bool(data.get("stop_on_error", False))
+    resume = bool(data.get("resume", False))
     clean = bool(data.get("clean", False))
     verbose = bool(data.get("verbose", False))
 
@@ -130,6 +131,7 @@ def parse_project_config(path: Path) -> ProjectConfig:
         jobs=jobs,
         parallel_variants=parallel_variants,
         stop_on_error=stop_on_error,
+        resume=resume,
         clean=clean,
         verbose=verbose,
     )

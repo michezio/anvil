@@ -47,6 +47,7 @@ def build_direct(
     variant: BuildVariant,
     config: ProjectConfig,
     extra_args: list[str] | None = None,
+    fingerprint: str = "",
 ) -> dict:
     """Compile source files directly (no CMake)."""
     out_bin = out_dir / f"{output_name}__{variant.name}"
@@ -89,6 +90,8 @@ def build_direct(
         "cxx_defines": list(variant.cxx_defines),
         "effective_flags": effective_flags,
         "sources": [str(s) for s in sources],
+        "artifact_sha256": _file_sha256(out_bin),
+        "fingerprint": fingerprint,
         "artifact": str(out_bin),
     }
 
@@ -102,6 +105,7 @@ def build_cmake(
     out_dir: Path,
     variant: BuildVariant,
     build_type: str,
+    fingerprint: str = "",
 ) -> dict:
     """Build a CMake target for a single variant."""
     build_dir = Path(config.build_dir) / variant.name / build_type.lower()
@@ -252,6 +256,7 @@ def build_cmake(
         "environment_setup_sha256": _file_sha256(Path(config.env_setup)) if config.env_setup else None,
         "environment": _selected_environment(config.env_setup),
         "artifact_sha256": _file_sha256(out_bin),
+        "fingerprint": fingerprint,
         "compile_commands": str(copied_compile_commands) if copied_compile_commands.exists() else None,
         "configure_command": cmake_config_cmd,
         "build_command": cmake_build_cmd,

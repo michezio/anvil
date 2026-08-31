@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -138,3 +139,55 @@ def test_interrupted_matrix_persists_partial_summary(
     assert [entry["name"] for entry in summary] == ["first"]
     assert manifest["complete"] is False
     assert manifest["interrupted"] is True
+
+
+def test_resume_reuses_only_matching_untampered_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "main.cpp"
+    source.write_text("int main() { return 0; }\n", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    build_calls = 0
+
+    def fake_build(*args: object, **kwargs: object) -> dict:
+        nonlocal build_calls
+        build_calls += 1
+        variant = kwargs["variant"]
+        fingerprint = kwargs["fingerprint"]
+        assert isinstance(variant, BuildVariant)
+        assert isinstance(fingerprint, str)
+        artifact = out_dir / f"app__{variant.name}"
+        artifact.write_text("artifact", encoding="utf-8")
+        metadata = {
+            "name": variant.name,
+            "artifact": str(artifact),
+            "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+            "fingerprint": fingerprint,
+        }
+        (out_dir / f"app__{variant.name}.json").write_text(
+            json.dumps(metadata), encoding="utf-8"
+        )
+        return metadata
+
+    monkeypatch.setattr("anvil.orchestrator.build_direct", fake_build)
+    arguments = {
+        "sources": [source],
+        "include_dir": tmp_path,
+        "out_dir": out_dir,
+        "output_name": "app",
+        "variants": [BuildVariant(name="cached")],
+        "extra_args": [],
+    }
+
+    assert _run_direct_matrix(config=ProjectConfig(), **arguments) == 0
+    assert _run_direct_matrix(config=ProjectConfig(resume=True), **arguments) == 0
+    assert build_calls == 1
+
+    (out_dir / "app__cached").write_text("tampered", encoding="utf-8")
+    assert _run_direct_matrix(config=ProjectConfig(resume=True), **arguments) == 0
+    assert build_calls == 2
+
+    source.write_text("int main() { return 1; }\n", encoding="utf-8")
+    assert _run_direct_matrix(config=ProjectConfig(resume=True), **arguments) == 0
+    assert build_calls == 3

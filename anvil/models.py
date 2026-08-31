@@ -32,5 +32,6 @@ class ProjectConfig:
     jobs: int = 0
     parallel_variants: int = 1
     stop_on_error: bool = False
+    resume: bool = False
     clean: bool = False
     verbose: bool = False

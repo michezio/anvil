@@ -154,6 +154,12 @@ def main() -> int:
         help="Stop on first variant failure (overrides config).",
     )
     parser.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Reuse successful artifacts whose build fingerprint still matches.",
+    )
+    parser.add_argument(
         "--jobs",
         "-j",
         type=int,
@@ -262,6 +268,8 @@ def main() -> int:
         overrides["clean"] = args.clean
     if args.stop_on_error is not None:
         overrides["stop_on_error"] = args.stop_on_error
+    if args.resume is not None:
+        overrides["resume"] = args.resume
     if args.jobs is not None:
         overrides["jobs"] = args.jobs
     if args.parallel is not None:
