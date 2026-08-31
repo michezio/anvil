@@ -5,9 +5,14 @@ from dataclasses import dataclass
 class BuildVariant:
     name: str = ""
     compiler: str = "g++"
+    c_compiler: str = ""
+    cxx_compiler: str = ""
     standard: str = "c++23"
+    c_flags: tuple[str, ...] = ()
     cxx_flags: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
+    c_defines: tuple[str, ...] = ()
+    cxx_defines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -24,6 +25,17 @@ def compose_effective_flags(cxx_flags: tuple[str, ...], defines: tuple[str, ...]
     return " ".join(parts)
 
 
+def _cmake_standard_arguments(standard: str) -> list[str]:
+    match = re.fullmatch(r"(c\+\+|gnu\+\+)(\d+)", standard)
+    if match is None:
+        raise ValueError(f"Unsupported C++ standard for CMake: {standard!r}")
+    return [
+        f"-DCMAKE_CXX_STANDARD={match.group(2)}",
+        "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+        f"-DCMAKE_CXX_EXTENSIONS={'ON' if match.group(1) == 'gnu++' else 'OFF'}",
+    ]
+
+
 def build_direct(
     sources: list[Path],
     include_dir: Path,
@@ -36,15 +48,17 @@ def build_direct(
     """Compile source files directly (no CMake)."""
     out_bin = out_dir / f"{output_name}__{variant.name}"
 
-    compiler_cmd = resolve_compiler_command(variant.compiler)
-    effective_flags = compose_effective_flags(variant.cxx_flags, variant.defines)
+    compiler = variant.cxx_compiler or variant.compiler
+    compiler_cmd = resolve_compiler_command(compiler)
+    effective_defines = variant.defines + variant.cxx_defines
+    effective_flags = compose_effective_flags(variant.cxx_flags, effective_defines)
 
     cmd = [*compiler_cmd]
     if variant.standard:
         cmd.append(f"-std={variant.standard}")
 
     cmd.extend(variant.cxx_flags)
-    cmd.extend(f"-D{d}" for d in variant.defines)
+    cmd.extend(f"-D{d}" for d in effective_defines)
 
     cmd.extend(["-fdiagnostics-color=always", "-g"])
 
@@ -65,10 +79,11 @@ def build_direct(
 
     metadata = {
         "name": variant.name,
-        "compiler": variant.compiler,
+        "compiler": compiler,
         "standard": variant.standard,
         "cxx_flags": list(variant.cxx_flags),
         "defines": list(variant.defines),
+        "cxx_defines": list(variant.cxx_defines),
         "effective_flags": effective_flags,
         "sources": [str(s) for s in sources],
         "artifact": str(out_bin),
@@ -91,13 +106,21 @@ def build_cmake(
         shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    effective_flags = compose_effective_flags(variant.cxx_flags, variant.defines)
+    effective_c_flags = compose_effective_flags(variant.c_flags, variant.defines + variant.c_defines)
+    effective_cxx_flags = compose_effective_flags(
+        variant.cxx_flags, variant.defines + variant.cxx_defines
+    )
     jobs = effective_jobs(config.jobs)
     variant_defaults = BuildVariant()
+    cxx_compiler = variant.cxx_compiler or variant.compiler
 
     cmake_config_cmd = ["cmake", "-S", str(root), "-B", str(build_dir)]
-    if variant.compiler and variant.compiler != variant_defaults.compiler:
-        cmake_config_cmd.append(f"-DCMAKE_CXX_COMPILER={variant.compiler}")
+    if cxx_compiler and cxx_compiler != variant_defaults.compiler:
+        cmake_config_cmd.append(f"-DCMAKE_CXX_COMPILER={cxx_compiler}")
+    if variant.c_compiler:
+        cmake_config_cmd.append(f"-DCMAKE_C_COMPILER={variant.c_compiler}")
+    if variant.standard:
+        cmake_config_cmd.extend(_cmake_standard_arguments(variant.standard))
 
     cmake_config_cmd.extend(config.cmake_args)
 
@@ -136,24 +159,26 @@ def build_cmake(
 
         cache_file = build_dir / "CMakeCache.txt"
         existing_cxx_flags = _read_cmake_cache_value(cache_file, cxx_key)
-        existing_c_flags = _read_cmake_cache_value(cache_file, c_key)
 
-        merged_cxx_flags = _merge_flag_strings(existing_cxx_flags, effective_flags)
-        merged_c_flags = _merge_flag_strings(existing_c_flags, effective_flags)
+        merged_cxx_flags = _merge_flag_strings(existing_cxx_flags, effective_cxx_flags)
 
-        _anvil_log(f"Injecting merged flags into {cxx_key} and {c_key}")
+        _anvil_log(f"Injecting merged flags into {cxx_key}")
         second_configure_cmd = [*cmake_config_cmd]
         second_configure_cmd.append(f"-D{cxx_key}:STRING={merged_cxx_flags}")
-        second_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
+        if effective_c_flags:
+            existing_c_flags = _read_cmake_cache_value(cache_file, c_key)
+            merged_c_flags = _merge_flag_strings(existing_c_flags, effective_c_flags)
+            second_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
         _run_configure(second_configure_cmd)
     else:
         _anvil_log(f"Custom config '{selected_config}': injecting blank-state Anvil flags")
-        merged_cxx_flags = effective_flags
-        merged_c_flags = effective_flags
+        merged_cxx_flags = effective_cxx_flags
 
         single_configure_cmd = [*cmake_config_cmd]
         single_configure_cmd.append(f"-D{cxx_key}:STRING={merged_cxx_flags}")
-        single_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
+        if effective_c_flags:
+            merged_c_flags = effective_c_flags
+            single_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
         _run_configure(single_configure_cmd)
 
     if config.env_setup:
@@ -176,13 +201,20 @@ def build_cmake(
     metadata = {
         "project": config.name,
         "name": variant.name,
-        "compiler": variant.compiler,
+        "compiler": cxx_compiler,
+        "c_compiler": variant.c_compiler,
+        "cxx_compiler": cxx_compiler,
         "standard": variant.standard,
         "build_type": build_type,
         "cmake_build_type": selected_config,
+        "c_flags": list(variant.c_flags),
         "cxx_flags": list(variant.cxx_flags),
         "defines": list(variant.defines),
-        "effective_flags": effective_flags,
+        "c_defines": list(variant.c_defines),
+        "cxx_defines": list(variant.cxx_defines),
+        "effective_c_flags": effective_c_flags,
+        "effective_cxx_flags": effective_cxx_flags,
+        "effective_flags": effective_cxx_flags,
         "build_dir": str(build_dir),
         "artifact": str(out_bin),
     }

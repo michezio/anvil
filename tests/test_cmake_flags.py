@@ -30,8 +30,11 @@ def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
         name="cmake_flags_variant",
         compiler=available_compiler,
         standard="c++20",
+        c_flags=("-DFROM_ANVIL_CFLAGS=1",),
         cxx_flags=("-DFROM_ANVIL_CXXFLAGS=1", "-O3"),
         defines=("FROM_ANVIL_DEFINES=1", "ANVIL_EXPECT_RELEASE=1", "ANVIL_EXPECT_NDEBUG=1"),
+        c_defines=("FROM_ANVIL_C_DEFINES=1",),
+        cxx_defines=("FROM_ANVIL_CXX_DEFINES=1",),
     )
 
     metadata = build_cmake(
@@ -50,7 +53,7 @@ def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
     saved = json.loads(metadata_file.read_text(encoding="utf-8"))
     assert (
         saved["effective_flags"]
-        == "-DFROM_ANVIL_CXXFLAGS=1 -O3 -DFROM_ANVIL_DEFINES=1 -DANVIL_EXPECT_RELEASE=1 -DANVIL_EXPECT_NDEBUG=1"
+        == "-DFROM_ANVIL_CXXFLAGS=1 -O3 -DFROM_ANVIL_DEFINES=1 -DANVIL_EXPECT_RELEASE=1 -DANVIL_EXPECT_NDEBUG=1 -DFROM_ANVIL_CXX_DEFINES=1"
     )
     assert saved["compiler"] == available_compiler
 
@@ -58,13 +61,24 @@ def test_cmake_flags_from_env_and_cmakelists_interact_with_release(
     cache_text = cache_file.read_text(encoding="utf-8")
     release_flags = cache_value(cache_text, "CMAKE_CXX_FLAGS_RELEASE")
     release_tokens = normalize_flag_tokens(release_flags)
+    c_release_flags = cache_value(cache_text, "CMAKE_C_FLAGS_RELEASE")
+    c_release_tokens = normalize_flag_tokens(c_release_flags)
 
     assert "CMAKE_CXX_FLAGS_RELEASE:STRING=" in cache_text
     assert "-DFROM_ANVIL_CXXFLAGS=1" in release_tokens
     assert "-DFROM_ANVIL_DEFINES=1" in release_tokens
     assert "-DANVIL_EXPECT_RELEASE=1" in release_tokens
     assert "-DANVIL_EXPECT_NDEBUG=1" in release_tokens
+    assert "-DFROM_ANVIL_CXX_DEFINES=1" in release_tokens
+    assert "-DFROM_ANVIL_CFLAGS=1" not in release_tokens
     assert "-DNDEBUG" in release_tokens
+    assert "-DFROM_ANVIL_CFLAGS=1" in c_release_tokens
+    assert "-DFROM_ANVIL_C_DEFINES=1" in c_release_tokens
+    assert "-DFROM_ANVIL_DEFINES=1" in c_release_tokens
+    assert "-DFROM_ANVIL_CXXFLAGS=1" not in c_release_tokens
+    assert cache_value(cache_text, "CMAKE_CXX_STANDARD") == "20"
+    assert cache_value(cache_text, "CMAKE_CXX_STANDARD_REQUIRED") == "ON"
+    assert cache_value(cache_text, "CMAKE_CXX_EXTENSIONS") == "OFF"
 
     if "CMAKE_BUILD_TYPE:STRING=" in cache_text:
         assert "CMAKE_BUILD_TYPE:STRING=Release" in cache_text

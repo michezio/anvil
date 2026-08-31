@@ -142,16 +142,26 @@ def _parse_base_entry(item: dict, *, source: str, defaults: BuildVariant) -> Bui
     _validate_variant_name(name, kind="base", source=source)
 
     compiler = str(item.get("compiler", defaults.compiler)).strip() or defaults.compiler
+    c_compiler = str(item.get("c_compiler", defaults.c_compiler)).strip()
+    cxx_compiler = str(item.get("cxx_compiler", defaults.cxx_compiler)).strip()
     standard = str(item.get("standard", defaults.standard)).strip() or defaults.standard
+    c_flags = _parse_string_list(item.get("c_flags", []), key="c_flags", owner=f"Base '{name}'")
     cxx_flags = _parse_string_list(item.get("cxx_flags", []), key="cxx_flags", owner=f"Base '{name}'")
     defines = _parse_string_list(item.get("defines", []), key="defines", owner=f"Base '{name}'")
+    c_defines = _parse_string_list(item.get("c_defines", []), key="c_defines", owner=f"Base '{name}'")
+    cxx_defines = _parse_string_list(item.get("cxx_defines", []), key="cxx_defines", owner=f"Base '{name}'")
 
     return BuildVariant(
         name=name,
         compiler=compiler,
+        c_compiler=c_compiler,
+        cxx_compiler=cxx_compiler,
         standard=standard,
+        c_flags=c_flags,
         cxx_flags=cxx_flags,
         defines=defines,
+        c_defines=c_defines,
+        cxx_defines=cxx_defines,
     )
 
 
@@ -201,20 +211,33 @@ def _parse_variants_config(data: dict, source: str = "<builtin>") -> list[BuildV
             base = variant_defaults
 
         compiler = str(item.get("compiler", base.compiler)).strip() or base.compiler
+        c_compiler = str(item.get("c_compiler", base.c_compiler)).strip()
+        cxx_compiler = str(item.get("cxx_compiler", base.cxx_compiler)).strip()
         standard = str(item.get("standard", base.standard)).strip() or base.standard
+        variant_c_flags = _parse_string_list(item.get("c_flags", []), key="c_flags", owner=f"Variant '{name}'")
         variant_cxx_flags = _parse_string_list(item.get("cxx_flags", []), key="cxx_flags", owner=f"Variant '{name}'")
         variant_defines = _parse_string_list(item.get("defines", []), key="defines", owner=f"Variant '{name}'")
+        variant_c_defines = _parse_string_list(item.get("c_defines", []), key="c_defines", owner=f"Variant '{name}'")
+        variant_cxx_defines = _parse_string_list(item.get("cxx_defines", []), key="cxx_defines", owner=f"Variant '{name}'")
 
+        c_flags = base.c_flags + variant_c_flags
         cxx_flags = base.cxx_flags + variant_cxx_flags
         defines = base.defines + variant_defines
+        c_defines = base.c_defines + variant_c_defines
+        cxx_defines = base.cxx_defines + variant_cxx_defines
 
         variants.append(
             BuildVariant(
                 name=name,
                 compiler=compiler,
+            c_compiler=c_compiler,
+            cxx_compiler=cxx_compiler,
                 standard=standard,
+            c_flags=c_flags,
                 cxx_flags=cxx_flags,
                 defines=defines,
+            c_defines=c_defines,
+            cxx_defines=cxx_defines,
             )
         )
 
