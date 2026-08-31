@@ -1,5 +1,6 @@
 import hashlib
 import json
+from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
@@ -191,3 +192,53 @@ def test_resume_reuses_only_matching_untampered_artifact(
     source.write_text("int main() { return 1; }\n", encoding="utf-8")
     assert _run_direct_matrix(config=ProjectConfig(resume=True), **arguments) == 0
     assert build_calls == 3
+
+
+def test_cmake_parallel_variants_share_the_job_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    submitted_jobs: list[int] = []
+
+    class ImmediateExecutor:
+        def __init__(self, max_workers: int) -> None:
+            assert max_workers == 2
+
+        def __enter__(self) -> "ImmediateExecutor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def submit(self, function: object, *args: object) -> Future:
+            future: Future = Future()
+            config = args[1]
+            variant = args[3]
+            submitted_jobs.append(config.jobs)
+            future.set_result(
+                {"name": variant.name, "artifact": str(tmp_path / variant.name)}
+            )
+            return future
+
+        def shutdown(self, wait: bool, cancel_futures: bool) -> None:
+            return None
+
+    monkeypatch.setattr("anvil.orchestrator.ProcessPoolExecutor", ImmediateExecutor)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    config = ProjectConfig(
+        build_dir=str(tmp_path / "build"),
+        cmake_target="app",
+        jobs=8,
+        parallel_variants=2,
+    )
+
+    return_code = _run_cmake_matrix(
+        root=tmp_path,
+        config=config,
+        out_dir=out_dir,
+        variants=[BuildVariant(name="one"), BuildVariant(name="two")],
+        build_type="Release",
+    )
+
+    assert return_code == 0
+    assert submitted_jobs == [4, 4]

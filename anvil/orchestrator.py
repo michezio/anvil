@@ -5,12 +5,13 @@ import shutil
 import subprocess
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from uuid import uuid4
 
 from .build import build_cmake, build_direct
 from .models import BuildVariant, ProjectConfig
+from .utils import effective_jobs
 
 
 def detect_mode(target: Path) -> str:
@@ -148,31 +149,72 @@ def _run_cmake_matrix(
     _remove_previous_outputs(out_dir, config.cmake_target, keep_variants=set(resumed))
 
     try:
-        for variant in variants:
-            print(f"\n=== [{variant.compiler}] {variant.name} ===")
-            if variant.name in resumed:
-                summary.append(resumed[variant.name])
-                print(f"    -> {resumed[variant.name]['artifact']} (resumed)")
+        if config.parallel_variants > 1:
+            jobs_per_variant = max(
+                1, effective_jobs(config.jobs) // config.parallel_variants
+            )
+            worker_config = replace(config, jobs=jobs_per_variant)
+            with ProcessPoolExecutor(max_workers=config.parallel_variants) as executor:
+                futures = {}
+                for variant in variants:
+                    if variant.name in resumed:
+                        summary.append(resumed[variant.name])
+                        _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
+                        continue
+                    future = executor.submit(
+                        build_cmake,
+                        root,
+                        worker_config,
+                        out_dir,
+                        variant,
+                        build_type,
+                        fingerprints[variant.name],
+                    )
+                    futures[future] = variant
+
+                for future in as_completed(futures):
+                    variant = futures[future]
+                    try:
+                        metadata = future.result()
+                        summary.append(metadata)
+                        print(f"  [{variant.compiler}] {variant.name} -> {metadata['artifact']}")
+                    except (RuntimeError, FileNotFoundError) as error:
+                        had_failure = True
+                        print(
+                            f"  [{variant.compiler}] {variant.name} FAILED: {error}",
+                            file=sys.stderr,
+                        )
+                        summary.append({"name": variant.name, "error": str(error)})
+                    _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
+                    if had_failure and config.stop_on_error:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+        else:
+            for variant in variants:
+                print(f"\n=== [{variant.compiler}] {variant.name} ===")
+                if variant.name in resumed:
+                    summary.append(resumed[variant.name])
+                    print(f"    -> {resumed[variant.name]['artifact']} (resumed)")
+                    _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
+                    continue
+                try:
+                    metadata = build_cmake(
+                        root=root,
+                        config=config,
+                        out_dir=out_dir,
+                        variant=variant,
+                        build_type=build_type,
+                        fingerprint=fingerprints[variant.name],
+                    )
+                    summary.append(metadata)
+                    print(f"    -> {metadata['artifact']}")
+                except (RuntimeError, FileNotFoundError) as error:
+                    had_failure = True
+                    print(f"    FAILED: {error}", file=sys.stderr)
+                    summary.append({"name": variant.name, "error": str(error)})
                 _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
-                continue
-            try:
-                metadata = build_cmake(
-                    root=root,
-                    config=config,
-                    out_dir=out_dir,
-                    variant=variant,
-                    build_type=build_type,
-                    fingerprint=fingerprints[variant.name],
-                )
-                summary.append(metadata)
-                print(f"    -> {metadata['artifact']}")
-            except (RuntimeError, FileNotFoundError) as e:
-                had_failure = True
-                print(f"    FAILED: {e}", file=sys.stderr)
-                summary.append({"name": variant.name, "error": str(e)})
-            _persist_run_state(out_dir, summary, run_id=run_id, complete=False)
-            if had_failure and config.stop_on_error:
-                break
+                if had_failure and config.stop_on_error:
+                    break
     except KeyboardInterrupt:
         _write_summary(out_dir, summary, run_id=run_id, complete=False, interrupted=True)
         return 130
