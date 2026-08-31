@@ -51,45 +51,73 @@ def build_direct(
 ) -> dict:
     """Compile source files directly (no CMake)."""
     out_bin = out_dir / f"{output_name}__{variant.name}"
+    cxx_compiler = variant.cxx_compiler or variant.compiler
+    c_compiler = variant.c_compiler or os.environ.get("CC", "cc")
+    effective_c_flags = compose_effective_flags(
+        variant.c_flags, variant.defines + variant.c_defines
+    )
+    effective_cxx_flags = compose_effective_flags(
+        variant.cxx_flags, variant.defines + variant.cxx_defines
+    )
 
-    compiler = variant.cxx_compiler or variant.compiler
-    compiler_cmd = resolve_compiler_command(compiler)
-    effective_defines = variant.defines + variant.cxx_defines
-    effective_flags = compose_effective_flags(variant.cxx_flags, effective_defines)
+    object_dir = out_dir / ".objects" / output_name / variant.name
+    if object_dir.exists():
+        shutil.rmtree(object_dir)
+    object_dir.mkdir(parents=True)
+    objects = []
+    compile_commands = []
+    has_cxx_source = False
+    for index, source in enumerate(sources):
+        is_c_source = source.suffix.lower() == ".c"
+        has_cxx_source = has_cxx_source or not is_c_source
+        compiler = c_compiler if is_c_source else cxx_compiler
+        flags = variant.c_flags if is_c_source else variant.cxx_flags
+        defines = (
+            variant.defines + variant.c_defines
+            if is_c_source
+            else variant.defines + variant.cxx_defines
+        )
+        object_path = object_dir / f"{index}_{source.stem}.o"
+        command = resolve_compiler_command(compiler)
+        if not is_c_source and variant.standard:
+            command.append(f"-std={variant.standard}")
+        command.extend(flags)
+        command.extend(f"-D{define}" for define in defines)
+        command.extend(["-fdiagnostics-color=always", "-g", f"-I{include_dir}"])
+        command.extend(f"-I{include}" for include in config.include_dirs)
+        if extra_args:
+            command.extend(extra_args)
+        command.extend(["-c", str(source), "-o", str(object_path)])
+        run_cmd(command, verbose=config.verbose)
+        objects.append(object_path)
+        compile_commands.append(command)
 
-    cmd = [*compiler_cmd]
-    if variant.standard:
-        cmd.append(f"-std={variant.standard}")
-
-    cmd.extend(variant.cxx_flags)
-    cmd.extend(f"-D{d}" for d in effective_defines)
-
-    cmd.extend(["-fdiagnostics-color=always", "-g"])
-
-    cmd.append(f"-I{include_dir}")
-    for inc in config.include_dirs:
-        cmd.append(f"-I{inc}")
-
-    cmd.extend(str(s) for s in sources)
-    cmd.extend(["-o", str(out_bin)])
-
+    linker = cxx_compiler if has_cxx_source else c_compiler
+    link_command = [*resolve_compiler_command(linker), *(str(path) for path in objects)]
+    link_command.extend(["-o", str(out_bin)])
     if config.link_flags:
-        cmd.extend(shlex.split(config.link_flags))
-
+        link_command.extend(shlex.split(config.link_flags))
     if extra_args:
-        cmd.extend(extra_args)
-
-    run_cmd(cmd, verbose=config.verbose)
+        link_command.extend(extra_args)
+    run_cmd(link_command, verbose=config.verbose)
 
     metadata = {
         "name": variant.name,
-        "compiler": compiler,
+        "compiler": cxx_compiler,
+        "c_compiler": c_compiler,
+        "cxx_compiler": cxx_compiler,
         "standard": variant.standard,
+        "c_flags": list(variant.c_flags),
         "cxx_flags": list(variant.cxx_flags),
         "defines": list(variant.defines),
+        "c_defines": list(variant.c_defines),
         "cxx_defines": list(variant.cxx_defines),
-        "effective_flags": effective_flags,
+        "effective_c_flags": effective_c_flags,
+        "effective_cxx_flags": effective_cxx_flags,
+        "effective_flags": effective_cxx_flags,
         "sources": [str(s) for s in sources],
+        "compile_commands": compile_commands,
+        "link_command": link_command,
         "artifact_sha256": _file_sha256(out_bin),
         "fingerprint": fingerprint,
         "artifact": str(out_bin),
