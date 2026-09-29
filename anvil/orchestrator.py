@@ -257,7 +257,7 @@ def _remove_previous_outputs(
     preserved = set()
     for variant_name in keep_variants or set():
         prefix = f"{output_name}__{variant_name}"
-        preserved.update({prefix, f"{prefix}.json", f"{prefix}.compile_commands.json"})
+        preserved.update({prefix, f"{prefix}.exe", f"{prefix}.json", f"{prefix}.compile_commands.json"})
     for path in out_dir.glob(f"{output_name}__*"):
         if path.name not in preserved and (path.is_file() or path.is_symlink()):
             path.unlink()

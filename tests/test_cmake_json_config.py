@@ -7,7 +7,7 @@ import pytest
 import anvil.cli
 from anvil.cli import main as anvil_main
 from cmake_helpers import cache_value, require_cmake
-from conftest import normalize_flag_tokens, resolve_artifact_path
+from conftest import normalize_flag_tokens
 
 
 def test_project_directory_is_the_default_target_and_boolean_can_be_disabled(
@@ -214,8 +214,8 @@ int main() {
     assert "-DFROM_JSON_CXXFLAGS=1" in metadata["effective_flags"]
     assert "-DFROM_JSON_DEFINES=1" in metadata["effective_flags"]
 
-    artifact = resolve_artifact_path(Path(metadata["artifact"]))
-    assert artifact.exists()
+    artifact = Path(metadata["artifact"])
+    assert artifact.is_file()
     assert artifact.stat().st_size > 0
 
     summary_file = out_dir / "build_summary.json"

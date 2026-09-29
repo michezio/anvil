@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
+import anvil.build
 from anvil.build import build_direct
 from anvil.models import BuildVariant, ProjectConfig
-from conftest import resolve_artifact_path
 import pytest
 
 
@@ -46,8 +46,8 @@ int main() {
         config=config,
     )
 
-    artifact = resolve_artifact_path(Path(metadata["artifact"]))
-    assert artifact.exists()
+    artifact = Path(metadata["artifact"])
+    assert artifact.is_file()
     assert artifact.stat().st_size > 0
 
     metadata_file = out_dir / "direct_app__direct_variant.json"
@@ -159,3 +159,35 @@ int c_value(void) { return 7; }
     assert "-DCXX_ONLY=1" not in c_command
     assert "-DCXX_ONLY=1" in cxx_command
     assert "-DC_ONLY=1" not in cxx_command
+
+
+def test_direct_build_records_windows_executable_path(
+    tmp_path: Path, available_compiler: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "main.cpp"
+    source.write_text("int main() { return 0; }\n", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    executable_path = anvil.build._executable_path
+    monkeypatch.setattr(
+        anvil.build,
+        "_executable_path",
+        lambda path: executable_path(path, windows=True),
+    )
+
+    metadata = build_direct(
+        sources=[source],
+        include_dir=tmp_path,
+        out_dir=out_dir,
+        output_name="app",
+        variant=BuildVariant(name="win.v1", compiler=available_compiler),
+        config=ProjectConfig(),
+    )
+
+    artifact = out_dir / "app__win.v1.exe"
+    assert artifact.is_file()
+    assert metadata["artifact"] == str(artifact)
+    assert metadata["link_command"][-1] == str(artifact)
+    assert len(metadata["artifact_sha256"]) == 64
+    saved = json.loads((out_dir / "app__win.v1.json").read_text(encoding="utf-8"))
+    assert saved["artifact"] == str(artifact)

@@ -166,6 +166,11 @@ python -m anvil --target src/ --project path/to/anvil_project.json
 
 In CMake mode, Anvil computes separate language payloads. Shared `defines` apply to both languages; `c_flags`/`c_defines` and `cxx_flags`/`cxx_defines` apply only to their language. `standard` configures CMake's required C++ standard.
 
+Visual Studio generators cannot isolate target-wide C and C++ flags for a target
+containing both languages. Anvil rejects language-specific payloads for such targets;
+use a Ninja generator with matching C and C++ compilers (for example via
+`cmake.args: ["-G", "Ninja"]`), or split C and C++ into separate CMake targets.
+
 - **Standard configs** (`Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`):
   Anvil **appends** injected flags to existing CMake/toolchain defaults.
   This preserves defaults like release-style optimization and `NDEBUG`.

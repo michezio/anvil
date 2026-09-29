@@ -32,18 +32,6 @@ def cmake_flags_asset_root() -> Path:
     return Path(__file__).parent / "assets" / "cmake_flags_project"
 
 
-def resolve_artifact_path(artifact_path: Path) -> Path:
-    """Return the produced artifact path, accounting for Windows .exe outputs."""
-    if artifact_path.exists():
-        return artifact_path
-
-    exe_candidate = artifact_path.with_suffix(".exe")
-    if exe_candidate.exists():
-        return exe_candidate
-
-    return artifact_path
-
-
 def normalize_flag_tokens(flag_string: str) -> set[str]:
     """Normalize common flag spellings so assertions are compiler-agnostic."""
     normalized: set[str] = set()

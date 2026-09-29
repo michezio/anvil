@@ -28,6 +28,14 @@ def compose_effective_flags(cxx_flags: tuple[str, ...], defines: tuple[str, ...]
     return " ".join(parts)
 
 
+def _executable_path(path: Path, *, windows: bool | None = None) -> Path:
+    if windows is None:
+        windows = os.name == "nt"
+    if windows and not path.name.lower().endswith(".exe"):
+        return path.with_name(f"{path.name}.exe")
+    return path
+
+
 def _cmake_standard_arguments(standard: str) -> list[str]:
     match = re.fullmatch(r"(c\+\+|gnu\+\+)(\d+)", standard)
     if match is None:
@@ -50,7 +58,7 @@ def build_direct(
     fingerprint: str = "",
 ) -> dict:
     """Compile source files directly (no CMake)."""
-    out_bin = out_dir / f"{output_name}__{variant.name}"
+    out_bin = _executable_path(out_dir / f"{output_name}__{variant.name}")
     cxx_compiler = variant.cxx_compiler or variant.compiler
     c_compiler = variant.c_compiler or os.environ.get("CC", "cc")
     effective_c_flags = compose_effective_flags(
@@ -153,7 +161,7 @@ def build_cmake(
     cxx_compiler = variant.cxx_compiler or variant.compiler
 
     cmake_config_cmd = ["cmake", "-S", str(root), "-B", str(build_dir)]
-    if cxx_compiler and cxx_compiler != variant_defaults.compiler:
+    if cxx_compiler and (variant.cxx_compiler or cxx_compiler != variant_defaults.compiler):
         cmake_config_cmd.append(f"-DCMAKE_CXX_COMPILER={cxx_compiler}")
     if variant.c_compiler:
         cmake_config_cmd.append(f"-DCMAKE_C_COMPILER={variant.c_compiler}")
@@ -166,10 +174,7 @@ def build_cmake(
     cmake_config_cmd.extend(config.cmake_args)
 
     selected_config = config.cmake_build_type or build_type
-    if selected_config:
-        cmake_config_cmd.append(f"-DCMAKE_BUILD_TYPE={selected_config}")
-
-    config_name_upper = selected_config.upper()
+    config_name_upper = re.sub(r"[^A-Za-z0-9]", "", selected_config).upper()
 
     cmake_build_cmd = [
         "cmake",
@@ -205,12 +210,15 @@ def build_cmake(
 
         _anvil_log(f"Injecting merged flags into {cxx_key}")
         second_configure_cmd = [*cmake_config_cmd]
+        if selected_config and not _is_multi_config(cache_file):
+            second_configure_cmd.append(f"-DCMAKE_BUILD_TYPE={selected_config}")
         second_configure_cmd.append(f"-D{cxx_key}:STRING={merged_cxx_flags}")
         if effective_c_flags:
             existing_c_flags = _read_cmake_cache_value(cache_file, c_key)
             merged_c_flags = _merge_flag_strings(existing_c_flags, effective_c_flags)
             second_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
         _run_configure(second_configure_cmd)
+        configure_command = second_configure_cmd
     else:
         _anvil_log(f"Custom config '{selected_config}': injecting blank-state Anvil flags")
         merged_cxx_flags = effective_cxx_flags
@@ -221,6 +229,26 @@ def build_cmake(
             merged_c_flags = effective_c_flags
             single_configure_cmd.append(f"-D{c_key}:STRING={merged_c_flags}")
         _run_configure(single_configure_cmd)
+        cache_file = build_dir / "CMakeCache.txt"
+        if selected_config and not _is_multi_config(cache_file):
+            single_configure_cmd.append(f"-DCMAKE_BUILD_TYPE={selected_config}")
+            _run_configure(single_configure_cmd)
+        configure_command = single_configure_cmd
+
+    if _read_cmake_cache_value(cache_file, "CMAKE_GENERATOR").startswith("Visual Studio") and (
+        variant.c_flags or variant.cxx_flags or variant.c_defines or variant.cxx_defines
+    ):
+        target_model = _cmake_target_model(build_dir, config.cmake_target, selected_config)
+        languages = (
+            {group["language"] for group in target_model.get("compileGroups", [])}
+            if target_model
+            else set()
+        )
+        if not target_model or {"C", "CXX"} <= languages:
+            raise RuntimeError(
+                "Visual Studio cannot isolate C and C++ flags in a mixed-language target. "
+                "Use a Ninja generator with matching C/C++ compilers or split the target by language."
+            )
 
     if config.env_setup:
         cmake_build = " ".join(sh_quote(token) for token in cmake_build_cmd)
@@ -230,7 +258,6 @@ def build_cmake(
         _anvil_log(f"Building target '{config.cmake_target}' with config '{selected_config}'")
         run_cmd(cmake_build_cmd, verbose=config.verbose)
 
-    out_bin = out_dir / f"{config.cmake_target}__{variant.name}"
     built_bin = _find_cmake_artifact(
         build_dir,
         config.cmake_target,
@@ -238,6 +265,10 @@ def build_cmake(
         explicit_artifact=config.cmake_artifact,
     )
     if built_bin:
+        out_bin = _executable_path(
+            out_dir / f"{config.cmake_target}__{variant.name}",
+            windows=built_bin.suffix.lower() == ".exe",
+        )
         shutil.copy2(built_bin, out_bin)
     else:
         raise FileNotFoundError(
@@ -286,7 +317,7 @@ def build_cmake(
         "artifact_sha256": _file_sha256(out_bin),
         "fingerprint": fingerprint,
         "compile_commands": str(copied_compile_commands) if copied_compile_commands.exists() else None,
-        "configure_command": cmake_config_cmd,
+        "configure_command": configure_command,
         "build_command": cmake_build_cmd,
         "artifact": str(out_bin),
     }
@@ -310,6 +341,25 @@ def _find_cmake_artifact(
             candidate = build_dir / candidate
         return candidate if candidate.is_file() else None
 
+    target_model = _cmake_target_model(build_dir, target_name, selected_config)
+    if target_model:
+        for artifact in target_model.get("artifacts", []):
+            candidate = build_dir / artifact["path"]
+            if candidate.is_file():
+                return candidate
+
+    # Older CMake versions or unsupported generators may not provide a codemodel reply.
+    for candidate in build_dir.rglob(target_name):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    for ext in ("", ".extra", ".exe"):
+        for candidate in build_dir.rglob(f"{target_name}{ext}"):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _cmake_target_model(build_dir: Path, target_name: str, selected_config: str) -> dict | None:
     reply_dir = build_dir / ".cmake" / "api" / "v1" / "reply"
     indexes = sorted(reply_dir.glob("index-*.json"), reverse=True)
     if indexes:
@@ -323,20 +373,7 @@ def _find_cmake_artifact(
                 for target_ref in configuration.get("targets", []):
                     if target_ref.get("name") != target_name:
                         continue
-                    target = json.loads((reply_dir / target_ref["jsonFile"]).read_text(encoding="utf-8"))
-                    for artifact in target.get("artifacts", []):
-                        candidate = build_dir / artifact["path"]
-                        if candidate.is_file():
-                            return candidate
-
-    # Older CMake versions or unsupported generators may not provide a codemodel reply.
-    for candidate in build_dir.rglob(target_name):
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return candidate
-    for ext in ("", ".extra", ".exe"):
-        for candidate in build_dir.rglob(f"{target_name}{ext}"):
-            if candidate.is_file():
-                return candidate
+                    return json.loads((reply_dir / target_ref["jsonFile"]).read_text(encoding="utf-8"))
     return None
 
 
@@ -382,6 +419,15 @@ def _read_cmake_cache_value(cache_file: Path, key: str) -> str:
             _, _, value = line.partition("=")
             return value.strip()
     return ""
+
+
+def _is_multi_config(cache_file: Path) -> bool:
+    generator = _read_cmake_cache_value(cache_file, "CMAKE_GENERATOR")
+    return generator.startswith("Visual Studio") or generator in {
+        "Ninja Multi-Config",
+        "Xcode",
+        "Green Hills MULTI",
+    }
 
 
 def _merge_flag_strings(existing: str, injected: str) -> str:

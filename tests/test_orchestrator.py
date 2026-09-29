@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from anvil.models import BuildVariant, ProjectConfig
-from anvil.orchestrator import _run_cmake_matrix, _run_direct_matrix
+from anvil.orchestrator import _remove_previous_outputs, _run_cmake_matrix, _run_direct_matrix
 
 
 @pytest.mark.parametrize("runner", ["direct", "cmake"])
@@ -105,6 +105,21 @@ def test_matrix_removes_stale_target_outputs(tmp_path: Path, monkeypatch: pytest
     assert manifest["complete"] is True
     assert manifest["artifacts"][0]["path"] == "app__current"
     assert len(manifest["artifacts"][0]["sha256"]) == 64
+
+
+def test_resume_cleanup_keeps_executable_and_metadata(tmp_path: Path) -> None:
+    saved_artifact = tmp_path / "app__cached.exe"
+    saved_artifact.write_bytes(b"current")
+    saved_metadata = tmp_path / "app__cached.json"
+    saved_metadata.write_text("{}", encoding="utf-8")
+    stale_artifact = tmp_path / "app__stale.exe"
+    stale_artifact.write_bytes(b"old")
+
+    _remove_previous_outputs(tmp_path, "app", keep_variants={"cached"})
+
+    assert saved_artifact.is_file()
+    assert saved_metadata.is_file()
+    assert not stale_artifact.exists()
 
 
 def test_interrupted_matrix_persists_partial_summary(

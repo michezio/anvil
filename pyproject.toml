@@ -34,6 +34,7 @@ Issues = "https://github.com/michezio/anvil/issues"
 [project.optional-dependencies]
 test = [
     "pytest>=7.4",
+    "ninja>=1.10; sys_platform == 'win32'",
 ]
 
 [project.scripts]
